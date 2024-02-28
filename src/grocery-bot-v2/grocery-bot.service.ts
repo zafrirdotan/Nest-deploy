@@ -22,6 +22,8 @@ export class GroceryBotService {
   constructor() {}
 
   async editCartCompletion(completionBody: GrocerySumBody) {
+    console.log('completionBody', completionBody);
+
     const { message, cart, lastAction } = completionBody;
     let language = 'en';
     if (containsHebrew(message.content)) {
@@ -168,6 +170,8 @@ export class GroceryBotService {
   }
 
   sayHallo(args) {
+    console.log('args', args);
+
     const { action } = args;
     if (action === UserAction.hallo) {
       return { role: 'system', content: 'Hallo' };
