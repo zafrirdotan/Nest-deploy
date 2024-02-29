@@ -1,4 +1,12 @@
-import { Body, Controller, Post, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { Response, Request } from 'express';
 import { ConversationService } from './conversation.service';
 import { CompletionBody } from './dto/completion-body.dto';
@@ -59,5 +67,15 @@ export class ConversationController {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders(); // flush the headers to establish SSE with client
+  }
+
+  @Get()
+  getHello(): string {
+    return 'Hello World!';
+  }
+
+  @Post()
+  postHello(): string {
+    return 'Hello World!';
   }
 }
