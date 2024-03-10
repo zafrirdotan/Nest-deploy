@@ -19,11 +19,25 @@ import { containsHebrew } from 'src/utils/language-detection';
 
 @Injectable()
 export class GroceryBotService {
-  constructor() {}
+  constructor() {
+    // this.test();
+  }
+
+  async test() {
+    const ItemsAvailabilityAndAlternatives =
+      await this.getItemsAvailabilityAndAlternatives([
+        { name: 'banana' },
+        { name: 'apple' },
+        { name: 'milk' },
+        { name: 'green apple' },
+      ]);
+    // console.log(
+    //   'ItemsAvailabilityAndAlternatives:',
+    //   ItemsAvailabilityAndAlternatives,
+    // );
+  }
 
   async editCartCompletion(completionBody: GrocerySumBody) {
-    console.log('completionBody', completionBody);
-
     const { message, cart, lastAction } = completionBody;
     let language = 'en';
     if (containsHebrew(message.content)) {
@@ -186,6 +200,7 @@ export class GroceryBotService {
 
     if (args.action === UserAction.addToCart) {
       const items = await this.getItemsAvailabilityAndAlternatives(args.list);
+
       const availableItems = items.filter(
         (item: ICartItem) => item.isAvailable,
       );
@@ -277,47 +292,36 @@ export class GroceryBotService {
   }
 
   async getItemsAvailabilityAndAlternatives(items) {
+    items = items.filter((item) => item.name !== 'item');
+
     const availableItemsMap = await this.findItemsInCatalog(
       items.map((item) => item.name),
     );
 
-    const keywords = Object.keys(availableItemsMap);
+    // const keywords = Object.keys(availableItemsMap);
 
-    const similarKeywordArray = [];
+    // const similarKeywordArray = [];
 
-    keywords.forEach((keyword) => {
-      availableItemsMap[keyword].forEach((item) => {
-        similarKeywordArray.push(item.key);
-      });
+    // keywords.forEach((keyword) => {
+    //   availableItemsMap[keyword].forEach((item) => {
+    //     similarKeywordArray.push(item.key);
+    //   });
+    // });
+    // console.log('similarKeywordArray', similarKeywordArray);
+
+    return items.map((item) => {
+      return {
+        ...item,
+        name: availableItemsMap[item.name][0]
+          ? availableItemsMap[item.name][0]?.name
+          : item.name,
+        isAvailable: availableItemsMap[item.name].length > 0,
+        alternatives: availableItemsMap[item.name].slice(1, 3),
+        price: availableItemsMap[item.name][0]
+          ? availableItemsMap[item.name][0]?.price
+          : null,
+      };
     });
-
-    const availableItemsMap2 = await this.findItemsInCatalogByName(
-      similarKeywordArray,
-    );
-
-    keywords.forEach((propertyName) => {
-      availableItemsMap[propertyName] = availableItemsMap[propertyName].map(
-        (item) => {
-          return Object.assign(item, ...availableItemsMap2[item.key]);
-        },
-      );
-    });
-
-    return items
-      .filter((item) => item.name !== 'item')
-      .map((item) => {
-        return {
-          ...item,
-          name: availableItemsMap[item.name][0]
-            ? availableItemsMap[item.name][0]?.name
-            : item.name,
-          isAvailable: availableItemsMap[item.name].length > 0,
-          alternatives: availableItemsMap[item.name].slice(1, 3),
-          price: availableItemsMap[item.name][0]
-            ? availableItemsMap[item.name][0]?.price
-            : null,
-        };
-      });
   }
 
   getOpenAI(): OpenAI {
@@ -333,6 +337,7 @@ export class GroceryBotService {
     itemNames.forEach((name) => {
       itemsMap[name] = this.findItemInCatalog(name, dbItems);
     });
+
     return itemsMap;
   }
 
@@ -342,15 +347,28 @@ export class GroceryBotService {
     return items;
   }
 
-  findItemInCatalog(name: string, dbItems) {
-    //  finds all items that contain the name as a separate word separated by space or by dash
+  findItemInCatalog(searchName: string, dbItems: any[]) {
+    const itemByName = dbItems?.filter(({ name }) => {
+      return name?.toLowerCase() === searchName?.toLowerCase();
+    });
 
-    return dbItems.filter((item) =>
-      item.name
-        ?.toLowerCase()
-        .split(/[\s-]+/)
-        .includes(name.toLowerCase()),
+    const itemsSimilarToName = dbItems?.filter(({ itemName }) => {
+      return itemName?.toLowerCase().includes(searchName?.toLowerCase());
+    });
+
+    const itemsStartsWithName = dbItems?.filter(({ itemName }) => {
+      return itemName?.toLowerCase().startsWith(searchName?.toLowerCase());
+    });
+    const itemBySearchKey = dbItems?.filter(({ searchKeywords }) =>
+      searchKeywords?.includes(searchName),
     );
+
+    return [
+      ...itemByName,
+      ...itemsStartsWithName,
+      ...itemBySearchKey,
+      ...itemsSimilarToName,
+    ];
   }
 
   async findItemsInCatalogByName(itemNames: string[]) {

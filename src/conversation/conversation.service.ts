@@ -11,9 +11,7 @@ export class ConversationService {
     const completion = await this.getOpenAI().chat.completions.create({
       model: 'gpt-3.5-turbo-0613',
       messages: completionMessage,
-      // functions: [],
       temperature: 0.9,
-      // max_tokens: 100,
       stream: true,
     });
 
