@@ -13,7 +13,7 @@ export class ConversationService {
       messages: completionMessage,
       // functions: [],
       temperature: 0.9,
-      max_tokens: 100,
+      // max_tokens: 100,
       stream: true,
     });
 
