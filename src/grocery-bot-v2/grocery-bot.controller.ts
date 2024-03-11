@@ -9,8 +9,6 @@ export class GroceryBotController {
 
   @Post()
   getCompletionWithFunctions(@Body() completionBody: GrocerySumBody) {
-    console.log('completionBody', completionBody);
-
     return this.groceryBotService.editCartCompletion(completionBody);
   }
 }

@@ -16,11 +16,41 @@ import {
 } from './consts/request-dictionary';
 import { mergeArrays, reduceArrays } from './utils/cart-utils';
 import { containsHebrew } from 'src/utils/language-detection';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { Product } from './entity/product.entity';
 
 @Injectable()
 export class GroceryBotService {
-  constructor() {
-    // this.test();
+  constructor(
+    @InjectModel('Product') private readonly productModel: Model<Product>,
+  ) {
+    // const product = new this.productModel({
+    //   name: 'banana',
+    //   price: 5,
+    //   searchKeywords: ['banana'],
+    //   //     id?: number;
+    //   // name: string;
+    //   // brand: string;
+    //   // quantity: string;
+    //   // price: string;
+    //   // productId: number;
+    //   // barcode: string;
+    //   // category: string;
+    //   brand: 'brand',
+    //   quantity: 4,
+    //   productId: 1,
+    //   barcode: 'barcode',
+    //   category: 'category',
+    // });
+    // product.save();
+    // this.productModel.find().then((res) => {
+    //   console.log('res', res);
+    // });
+    // this.getMockItemsFromFS().then((res) => {
+    //   // console.log('res', res);
+    //   this.productModel.insertMany(res);
+    // });
   }
 
   async test() {
@@ -216,7 +246,7 @@ export class GroceryBotService {
       updatedCart = reduceArrays(cart, args.list);
       message = responseDictionary.removingItemsFromCart[language](args);
     } else if (args.action === UserAction.isProductAvailable) {
-      const items = this.findItemInCatalog(args.list[0]?.name, cart);
+      const items = await this.findItemInCatalog(args.list[0]?.name, cart);
       args.list[0].isAvailable = items.length > 0;
       message = responseDictionary.isProductAvailable[language](args);
     } else if (args.action === UserAction.showCart) {
@@ -298,6 +328,8 @@ export class GroceryBotService {
       items.map((item) => item.name),
     );
 
+    // console.log('availableItemsMap', availableItemsMap);
+
     // const keywords = Object.keys(availableItemsMap);
 
     // const similarKeywordArray = [];
@@ -334,9 +366,9 @@ export class GroceryBotService {
     const dbItems = await this.getMockItemsFromFS();
 
     const itemsMap = {};
-    itemNames.forEach((name) => {
-      itemsMap[name] = this.findItemInCatalog(name, dbItems);
-    });
+    for (const name of itemNames) {
+      itemsMap[name] = await this.findItemInCatalog(name, dbItems);
+    }
 
     return itemsMap;
   }
@@ -347,27 +379,103 @@ export class GroceryBotService {
     return items;
   }
 
-  findItemInCatalog(searchName: string, dbItems: any[]) {
-    const itemByName = dbItems?.filter(({ name }) => {
-      return name?.toLowerCase() === searchName?.toLowerCase();
-    });
+  async findItemInCatalog(searchName: string, dbItems: any[]) {
+    // const itemByName = dbItems?.filter(({ name }) => {
+    //   return name?.toLowerCase() === searchName?.toLowerCase();
+    // });
+    console.log('searchName', searchName);
 
-    const itemsSimilarToName = dbItems?.filter(({ itemName }) => {
-      return itemName?.toLowerCase().includes(searchName?.toLowerCase());
-    });
+    // const itemByName = await this.productModel
+    //   .find({
+    //     $or: [
+    //       // Condition 1: Name starts with a specific prefix, case-insensitive
+    //       {
+    //         name: { $regex: `^${searchName}`, $options: 'i' },
+    //       },
+    //       // Condition 2: Search key exists in the `searchKeys` array
+    //       {
+    //         searchKeywords: { $in: [searchName] },
+    //       },
+    //       // Condition 3: Name includes a specific string, case-insensitive
+    //       {
+    //         name: { $regex: searchName, $options: 'i' },
+    //       },
+    //     ],
+    //   })
+    //   .exec();
 
-    const itemsStartsWithName = dbItems?.filter(({ itemName }) => {
-      return itemName?.toLowerCase().startsWith(searchName?.toLowerCase());
-    });
-    const itemBySearchKey = dbItems?.filter(({ searchKeywords }) =>
-      searchKeywords?.includes(searchName),
-    );
+    const testAggregation = await this.productModel
+      .aggregate([
+        {
+          $addFields: {
+            // Condition 1: Name starts with a specific prefix, case-insensitive
+            priority1: {
+              $cond: [
+                {
+                  $regexMatch: {
+                    input: '$name',
+                    regex: `^${searchName}`,
+                    options: 'i',
+                  },
+                },
+                // Priority fields: 1 if condition is met, 0 otherwise
+                1,
+                0,
+              ],
+            },
+            // Condition 2: Search key exists in the `searchKeys` array
+
+            priority2: {
+              $cond: [{ $in: [searchName, '$searchKeywords'] }, 1, 0],
+            },
+            // Condition 3: Name includes a specific string, case-insensitive
+
+            priority3: {
+              $cond: [
+                {
+                  $regexMatch: {
+                    input: '$name',
+                    regex: searchName,
+                    options: 'i',
+                  },
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+        {
+          $match: {
+            // Ensure at least one priority field is 1
+            $or: [{ priority1: 1 }, { priority2: 1 }, { priority3: 1 }],
+          },
+        },
+        {
+          // Sort by priority fields: descending order (1 is higher priority than 0)
+          $sort: { priority1: -1, priority2: -1, priority3: -1 },
+        },
+      ])
+      .exec();
+
+    console.log('testAggregation', testAggregation);
+
+    // const itemsSimilarToName = dbItems?.filter(({ itemName }) => {
+    //   return itemName?.toLowerCase().includes(searchName?.toLowerCase());
+    // });
+
+    // const itemsStartsWithName = dbItems?.filter(({ itemName }) => {
+    //   return itemName?.toLowerCase().startsWith(searchName?.toLowerCase());
+    // });
+    // const itemBySearchKey = dbItems?.filter(({ searchKeywords }) =>
+    //   searchKeywords?.includes(searchName),
+    // );
 
     return [
-      ...itemByName,
-      ...itemsStartsWithName,
-      ...itemBySearchKey,
-      ...itemsSimilarToName,
+      ...testAggregation,
+      // ...itemsStartsWithName,
+      // ...itemBySearchKey,
+      // ...itemsSimilarToName,
     ];
   }
 
