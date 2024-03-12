@@ -328,19 +328,6 @@ export class GroceryBotService {
       items.map((item) => item.name),
     );
 
-    // console.log('availableItemsMap', availableItemsMap);
-
-    // const keywords = Object.keys(availableItemsMap);
-
-    // const similarKeywordArray = [];
-
-    // keywords.forEach((keyword) => {
-    //   availableItemsMap[keyword].forEach((item) => {
-    //     similarKeywordArray.push(item.key);
-    //   });
-    // });
-    // console.log('similarKeywordArray', similarKeywordArray);
-
     return items.map((item) => {
       return {
         ...item,
@@ -380,30 +367,6 @@ export class GroceryBotService {
   }
 
   async findItemInCatalog(searchName: string, dbItems: any[]) {
-    // const itemByName = dbItems?.filter(({ name }) => {
-    //   return name?.toLowerCase() === searchName?.toLowerCase();
-    // });
-    console.log('searchName', searchName);
-
-    // const itemByName = await this.productModel
-    //   .find({
-    //     $or: [
-    //       // Condition 1: Name starts with a specific prefix, case-insensitive
-    //       {
-    //         name: { $regex: `^${searchName}`, $options: 'i' },
-    //       },
-    //       // Condition 2: Search key exists in the `searchKeys` array
-    //       {
-    //         searchKeywords: { $in: [searchName] },
-    //       },
-    //       // Condition 3: Name includes a specific string, case-insensitive
-    //       {
-    //         name: { $regex: searchName, $options: 'i' },
-    //       },
-    //     ],
-    //   })
-    //   .exec();
-
     const testAggregation = await this.productModel
       .aggregate([
         {
@@ -455,28 +418,24 @@ export class GroceryBotService {
           // Sort by priority fields: descending order (1 is higher priority than 0)
           $sort: { priority1: -1, priority2: -1, priority3: -1 },
         },
+        {
+          $project: {
+            // Exclude 'searchKeywords' from the results
+            searchKeywords: 0,
+            priority1: 0,
+            priority2: 0,
+            priority3: 0,
+            // Optional: Explicitly include fields if needed
+            // name: 1,
+            // otherField: 1,
+          },
+        },
       ])
       .exec();
 
     console.log('testAggregation', testAggregation);
 
-    // const itemsSimilarToName = dbItems?.filter(({ itemName }) => {
-    //   return itemName?.toLowerCase().includes(searchName?.toLowerCase());
-    // });
-
-    // const itemsStartsWithName = dbItems?.filter(({ itemName }) => {
-    //   return itemName?.toLowerCase().startsWith(searchName?.toLowerCase());
-    // });
-    // const itemBySearchKey = dbItems?.filter(({ searchKeywords }) =>
-    //   searchKeywords?.includes(searchName),
-    // );
-
-    return [
-      ...testAggregation,
-      // ...itemsStartsWithName,
-      // ...itemBySearchKey,
-      // ...itemsSimilarToName,
-    ];
+    return testAggregation;
   }
 
   async findItemsInCatalogByName(itemNames: string[]) {
