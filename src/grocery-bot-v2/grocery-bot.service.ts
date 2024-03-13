@@ -14,7 +14,7 @@ import {
   FunctionEntityTypes as OAIParam,
   RequestActions,
 } from './consts/request-dictionary';
-import { mergeArrays, reduceArrays } from './utils/cart-utils';
+import { mergeArrays, reduceArrays, removeFromArray } from './utils/cart-utils';
 import { containsHebrew } from 'src/utils/language-detection';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -243,14 +243,25 @@ export class GroceryBotService {
         unavailableItems,
       );
     } else if (args.action === UserAction.removeFromCart) {
-      updatedCart = reduceArrays(cart, args.list);
+      console.log('args', args);
+      console.log('cart', cart);
+
+      updatedCart = removeFromArray(cart, args.list);
+      console.log('updatedCart', updatedCart);
+
       message = responseDictionary.removingItemsFromCart[language](args);
     } else if (args.action === UserAction.isProductAvailable) {
-      const items = await this.findItemInCatalog(args.list[0]?.name, cart);
-      args.list[0].isAvailable = items.length > 0;
-      message = responseDictionary.isProductAvailable[language](args);
+      if (args && args.list && args.list[0] && args.list[0].name) {
+        const items = await this.findItemInCatalog(args.list[0]?.name);
+        args.list[0].isAvailable = items.length > 0;
+        message = responseDictionary.isProductAvailable[language](args, items);
+      }
     } else if (args.action === UserAction.showCart) {
-      message = responseDictionary.showCart[language](args);
+      message =
+        responseDictionary.showCart[language](args) +
+        ` ${cart
+          .map((item) => `\n * ${item.quantity} ${item.name} ${item.price}$`)
+          .join(', ')}`;
     } else if (args.action === UserAction.clearCart) {
       message = responseDictionary.clearCart[language](args);
       return {
@@ -290,6 +301,8 @@ export class GroceryBotService {
   }
 
   async addOrRemoveX(args, cart?: any[], language?: string) {
+    console.log('args', args);
+
     let message: string = '';
     let updatedCart: ICartItem[] = cart;
 
@@ -339,6 +352,7 @@ export class GroceryBotService {
         price: availableItemsMap[item.name][0]
           ? availableItemsMap[item.name][0]?.price
           : null,
+        searchKeywords: availableItemsMap[item.name][0]?.searchKeywords,
       };
     });
   }
@@ -350,11 +364,9 @@ export class GroceryBotService {
   }
 
   async findItemsInCatalog(itemNames: string[]) {
-    const dbItems = await this.getMockItemsFromFS();
-
     const itemsMap = {};
     for (const name of itemNames) {
-      itemsMap[name] = await this.findItemInCatalog(name, dbItems);
+      itemsMap[name] = await this.findItemInCatalog(name);
     }
 
     return itemsMap;
@@ -362,22 +374,37 @@ export class GroceryBotService {
 
   async findOneItemInCatalog(name: string) {
     const items = await this.getMockItemsFromFS();
-    this.findItemInCatalog(name, items);
+    this.findItemInCatalog(name);
     return items;
   }
 
-  async findItemInCatalog(searchName: string, dbItems: any[]) {
+  async findItemInCatalog(searchName: string) {
     const testAggregation = await this.productModel
       .aggregate([
         {
           $addFields: {
-            // Condition 1: Name starts with a specific prefix, case-insensitive
-            priority1: {
+            // Condition 0: exact match, case-insensitive
+            isExactMatch: {
               $cond: [
                 {
                   $regexMatch: {
                     input: '$name',
-                    regex: `^${searchName}`,
+                    regex: searchName,
+                    options: 'i',
+                  },
+                },
+                // Priority fields: 1 if condition is met, 0 otherwise
+                1,
+                0,
+              ],
+            },
+            // Condition 1: Search name exists in the `subCategory` array
+            isSubCategory: {
+              $cond: [
+                {
+                  $regexMatch: {
+                    input: '$subCategory',
+                    regex: `searchName`,
                     options: 'i',
                   },
                 },
@@ -387,49 +414,41 @@ export class GroceryBotService {
               ],
             },
             // Condition 2: Search key exists in the `searchKeys` array
-
-            priority2: {
+            includedInSearchKey: {
               $cond: [{ $in: [searchName, '$searchKeywords'] }, 1, 0],
-            },
-            // Condition 3: Name includes a specific string, case-insensitive
-
-            priority3: {
-              $cond: [
-                {
-                  $regexMatch: {
-                    input: '$name',
-                    regex: searchName,
-                    options: 'i',
-                  },
-                },
-                1,
-                0,
-              ],
             },
           },
         },
         {
           $match: {
             // Ensure at least one priority field is 1
-            $or: [{ priority1: 1 }, { priority2: 1 }, { priority3: 1 }],
+            $or: [
+              { isExactMatch: 1 },
+              { isSubCategory: 1 },
+              { includedInSearchKey: 1 },
+            ],
           },
         },
         {
           // Sort by priority fields: descending order (1 is higher priority than 0)
-          $sort: { priority1: -1, priority2: -1, priority3: -1 },
-        },
-        {
-          $project: {
-            // Exclude 'searchKeywords' from the results
-            searchKeywords: 0,
-            priority1: 0,
-            priority2: 0,
-            priority3: 0,
-            // Optional: Explicitly include fields if needed
-            // name: 1,
-            // otherField: 1,
+          $sort: {
+            isExactMatch: -1,
+            isSubCategory: -1,
+            includedInSearchKey: -1,
           },
         },
+        // {
+        //   $project: {
+        //     // Exclude 'searchKeywords' from the results
+        //     // searchKeywords: 0,
+        //     // priority1: 0,
+        //     // priority2: 0,
+        //     // priority3: 0,
+        //     // Optional: Explicitly include fields if needed
+        //     // name: 1,
+        //     // otherField: 1,
+        //   },
+        // },
       ])
       .exec();
 
@@ -454,7 +473,7 @@ export class GroceryBotService {
     const fs = require('fs').promises;
 
     // Specify the path to the JSON file
-    const filePath = 'src/grocery-bot-v2/mock-data/mock-db.json';
+    const filePath = 'src/grocery-bot-v2/mock-data/mock-db-v2.json';
 
     try {
       // Read the file asynchronously

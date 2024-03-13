@@ -23,6 +23,19 @@ export function reduceArrays(cart: ICartItem[], removedItems: ICartItem[]) {
   return Array.from(nameToItem.values());
 }
 
+export function removeFromArray(cart: ICartItem[], removedItems: ICartItem[]) {
+  // remove from the cart items that are part of the cart items searchKeywords
+  const removedNames = removedItems.map((item) => item.name);
+  const newCart = cart.filter(
+    (item) =>
+      !removedNames.includes(item.name) &&
+      !isAnyElementIncluded(item.searchKeywords, removedNames),
+
+    // add as well the items that are not part of the searchKeywords
+  );
+  return newCart;
+}
+
 export function mergeArrays(cart: ICartItem[], addedItems: ICartItem[]) {
   const mergedArray = [...cart, ...addedItems];
   const nameToItem = new Map();
@@ -39,4 +52,10 @@ export function mergeArrays(cart: ICartItem[], addedItems: ICartItem[]) {
   });
 
   return Array.from(nameToItem.values());
+}
+
+function isAnyElementIncluded(arr1, arr2) {
+  // Check if any element in arr1 is included in arr2
+
+  return arr1?.some((element) => arr2?.includes(element));
 }
