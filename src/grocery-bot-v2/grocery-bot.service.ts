@@ -144,7 +144,6 @@ export class GroceryBotService {
                 enum: [
                   UserAction.addToCart,
                   UserAction.removeFromCart,
-                  UserAction.isProductAvailable,
                   UserAction.showCart,
                   UserAction.clearCart,
                 ],
@@ -190,24 +189,46 @@ export class GroceryBotService {
           },
         },
         {
-          name: 'getRecipe',
-          description: 'user asks for a recipe',
+          name: 'getAvailableProducts',
+          description: 'user asks what kind of product is available',
           parameters: {
             type: 'object',
             properties: {
               action: {
                 type: 'string',
-                enum: ['do you have', 'recipe'],
+                enum: [
+                  UserAction.whatKindOfProduct,
+                  UserAction.isProductAvailable,
+                ],
               },
-              recipeType: { type: 'string' },
+              productName: { type: OAIParam.string },
             },
             required: ['action'],
           },
         },
+        // {
+        //   name: 'getRecipe',
+        //   description: 'user asks for a recipe',
+        //   parameters: {
+        //     type: 'object',
+        //     properties: {
+        //       action: {
+        //         type: 'string',
+        //         enum: ['do you have', 'recipe'],
+        //       },
+        //       recipeType: { type: 'string' },
+        //     },
+        //     required: ['action'],
+        //   },
+        // },
       ],
     });
 
     const responseMessage = response.choices[0].message;
+    if (responseMessage.content) {
+      return responseMessage;
+    }
+    console.log('responseMessage', responseMessage);
 
     if (responseMessage.function_call) {
       const availableFunctions = {
@@ -216,12 +237,14 @@ export class GroceryBotService {
         addAndRemove: this.addAndRemove.bind(this),
         addOrRemoveX: this.addOrRemoveX.bind(this),
         getRecipe: this.getRecipe.bind(this),
+        getAvailableProducts: this.getAvailableProducts.bind(this),
       };
 
       const functionName = responseMessage.function_call.name;
 
       const functionToCall = availableFunctions[functionName];
       const functionArgs = JSON.parse(responseMessage.function_call.arguments);
+      console.log('functionArgs', functionArgs);
 
       const functionResponse = await functionToCall(
         functionArgs,
@@ -280,7 +303,7 @@ export class GroceryBotService {
 
       if (args && args.list && args.list[0] && args.list[0].name) {
         const items = await this.findItemInCatalog(args.list[0]?.name);
-        args.list[0].isAvailable = items.length > 0;
+
         message = responseDictionary.isProductAvailable[language](args, items);
       }
     } else if (args.action === UserAction.showCart) {
@@ -362,6 +385,24 @@ export class GroceryBotService {
       action: args.action,
       items: args.list,
     };
+  }
+
+  async getAvailableProducts(args: any, cart?: any[], language?: string) {
+    if (args && args.productName) {
+      const items = await this.findItemInCatalog(args.productName);
+      const content = responseDictionary.isProductAvailable[language](
+        args.productName,
+        items,
+      );
+
+      return {
+        role: 'system',
+        content,
+        cart,
+        action: args.action,
+        items: args.list,
+      };
+    }
   }
 
   async getRecipe(args: any) {

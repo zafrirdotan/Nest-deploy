@@ -6,6 +6,7 @@ export enum UserAction {
   removeX = 'remove x',
   clearCart = 'clear cart',
   isProductAvailable = 'user asks is product available?',
+  whatKindOfProduct = 'user asks what kind of product is available?',
   howAreYou = 'user asking how are you',
   hallo = 'user saying hallo',
   yes = 'yes',

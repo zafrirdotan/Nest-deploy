@@ -81,17 +81,15 @@ export const responseDictionary: Record<
     en: () => 'Are you shore you want to clear your cart?',
   },
   isProductAvailable: {
-    en: (action: any, items) => {
-      if (action?.list[0]?.isAvailable) {
-        return `The product ${action?.list[0]?.name} is available. ${items.map(
-          (item) => {
-            return `\n- ${item.name} ${item.brand} ${item.price} $`;
-          },
-        )}
-        \n Do you want to add one of them to your cart?`;
+    en: (productName: string, items) => {
+      if (items?.length) {
+        return `We have a verity of ${productName}. ${items.map((item) => {
+          return `\n- ${item.name} ${item.brand} ${item.price} $`;
+        })}
+      \n Do you want to add one of them to your cart?`;
       } else {
-        return `Sorry, I didn't find ${action?.list[0]?.name}.
-        \n Would you like anything else?`;
+        return `Sorry, I didn't find ${productName}.
+      \n Would you like anything else?`;
       }
     },
     he: (action: any) =>
