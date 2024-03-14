@@ -97,7 +97,6 @@ export class GroceryBotService {
         )}`,
       });
     }
-
     const response = await this.getOpenAI().chat.completions.create({
       model: 'gpt-3.5-turbo-0613',
       messages: massages,
@@ -190,6 +189,21 @@ export class GroceryBotService {
             required: ['action'],
           },
         },
+        {
+          name: 'getRecipe',
+          description: 'user asks for a recipe',
+          parameters: {
+            type: 'object',
+            properties: {
+              action: {
+                type: 'string',
+                enum: ['do you have', 'recipe'],
+              },
+              recipeType: { type: 'string' },
+            },
+            required: ['action'],
+          },
+        },
       ],
     });
 
@@ -201,13 +215,14 @@ export class GroceryBotService {
         yesNo: this.yesNo.bind(this),
         addAndRemove: this.addAndRemove.bind(this),
         addOrRemoveX: this.addOrRemoveX.bind(this),
+        getRecipe: this.getRecipe.bind(this),
       };
 
       const functionName = responseMessage.function_call.name;
-      console.log('functionName', functionName);
 
       const functionToCall = availableFunctions[functionName];
       const functionArgs = JSON.parse(responseMessage.function_call.arguments);
+
       const functionResponse = await functionToCall(
         functionArgs,
         cart,
@@ -338,13 +353,32 @@ export class GroceryBotService {
     } else if (args.action === UserAction.removeX) {
       updatedCart = reduceArrays(cart, args.list);
       message = responseDictionary.removingItemsFromCart[language](args);
-    } else {
     }
 
     return {
       role: 'system',
       content: message,
       cart: updatedCart,
+      action: args.action,
+      items: args.list,
+    };
+  }
+
+  async getRecipe(args: any) {
+    const answer = await this.getOpenAI().chat.completions.create({
+      model: 'gpt-3.5-turbo-0613',
+      messages: [
+        {
+          role: 'user',
+          content: 'Generate a recipe for ' + args.recipeType,
+        },
+      ],
+      temperature: 0.9,
+    });
+
+    return {
+      role: 'system',
+      content: answer.choices[0].message.content,
       action: args.action,
       items: args.list,
     };
@@ -467,8 +501,6 @@ export class GroceryBotService {
         // },
       ])
       .exec();
-
-    console.log('testAggregation', testAggregation);
 
     return testAggregation;
   }
