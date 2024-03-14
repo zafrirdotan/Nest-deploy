@@ -31,6 +31,11 @@ export interface ICartItem {
   unit: string;
   isAvailable: boolean;
   searchKeywords?: string[];
+  price?: number;
+  productId?: number;
+  barcode?: string;
+  category?: string;
+  emoji?: string;
 }
 
 export interface LastAction {

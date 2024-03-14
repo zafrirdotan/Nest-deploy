@@ -22,15 +22,18 @@ export const responseDictionary: Record<
     en: (availableItems, unavailableItems) => {
       if (availableItems?.length) {
         return `Sure! I have added the flowing items to your cart ${availableItems?.map(
-          (item: any) => `\n- ${item.quantity} ${item.unit} ${item.name}`,
+          (item: any) =>
+            `\n- ${item.quantity} ${item.unit} ${item.name} ${
+              item.emoji || ''
+            } for ${item.price} $`,
         )}
-                ${
-                  unavailableItems?.length
-                    ? `\nbut I could not find the following items ${unavailableItems.map(
-                        (item: any) => `\n- ${item.name}`,
-                      )}`
-                    : ''
-                }`;
+          ${
+            unavailableItems?.length
+              ? `\nbut I could not find the following items ${unavailableItems.map(
+                  (item: any) => `\n- ${item.name}`,
+                )}`
+              : ''
+          }`;
       } else if (unavailableItems?.length) {
         return `Sorry, I could not find the following items ${unavailableItems.map(
           (item: any) => `\n- ${item.name}`,
@@ -82,7 +85,7 @@ export const responseDictionary: Record<
       if (action?.list[0]?.isAvailable) {
         return `The product ${action?.list[0]?.name} is available. ${items.map(
           (item) => {
-            return `\n- ${item.name} is available for ${item.price} $`;
+            return `\n- ${item.name} ${item.brand} ${item.price} $`;
           },
         )}
         \n Do you want to add one of them to your cart?`;

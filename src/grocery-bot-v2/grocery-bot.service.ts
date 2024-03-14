@@ -14,7 +14,12 @@ import {
   FunctionEntityTypes as OAIParam,
   RequestActions,
 } from './consts/request-dictionary';
-import { mergeArrays, reduceArrays, removeFromArray } from './utils/cart-utils';
+import {
+  getEmoji,
+  mergeArrays,
+  reduceArrays,
+  removeFromArray,
+} from './utils/cart-utils';
 import { containsHebrew } from 'src/utils/language-detection';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -48,7 +53,7 @@ export class GroceryBotService {
     //   console.log('res', res);
     // });
     // this.getMockItemsFromFS().then((res) => {
-    //   // console.log('res', res);
+    //   console.log('res', res);
     //   this.productModel.insertMany(res);
     // });
   }
@@ -199,6 +204,7 @@ export class GroceryBotService {
       };
 
       const functionName = responseMessage.function_call.name;
+      console.log('functionName', functionName);
 
       const functionToCall = availableFunctions[functionName];
       const functionArgs = JSON.parse(responseMessage.function_call.arguments);
@@ -231,26 +237,32 @@ export class GroceryBotService {
     if (args.action === UserAction.addToCart) {
       const items = await this.getItemsAvailabilityAndAlternatives(args.list);
 
-      const availableItems = items.filter(
-        (item: ICartItem) => item.isAvailable,
-      );
-      const unavailableItems = items.filter(
-        (item: ICartItem) => !item.isAvailable,
-      );
+      const availableItems = items
+        .filter((item: ICartItem) => item.isAvailable)
+        .map((item) => {
+          item.emoji = getEmoji(item.name);
+          return item;
+        });
+
+      const unavailableItems = items
+        .filter((item: ICartItem) => !item.isAvailable)
+        .map((item) => {
+          item.emoji = getEmoji(item.name);
+          return item;
+        });
       updatedCart = mergeArrays(cart, availableItems);
+
       message = responseDictionary.addingItemsToCart[language](
         availableItems,
         unavailableItems,
       );
     } else if (args.action === UserAction.removeFromCart) {
-      console.log('args', args);
-      console.log('cart', cart);
-
       updatedCart = removeFromArray(cart, args.list);
-      console.log('updatedCart', updatedCart);
 
       message = responseDictionary.removingItemsFromCart[language](args);
     } else if (args.action === UserAction.isProductAvailable) {
+      console.log('args', args);
+
       if (args && args.list && args.list[0] && args.list[0].name) {
         const items = await this.findItemInCatalog(args.list[0]?.name);
         args.list[0].isAvailable = items.length > 0;
@@ -260,7 +272,12 @@ export class GroceryBotService {
       message =
         responseDictionary.showCart[language](args) +
         ` ${cart
-          .map((item) => `\n * ${item.quantity} ${item.name} ${item.price}$`)
+          .map(
+            (item) =>
+              `\n * ${item.quantity} ${item.name} ${item.emoji || ''} ${
+                item.price
+              }$`,
+          )
           .join(', ')}`;
     } else if (args.action === UserAction.clearCart) {
       message = responseDictionary.clearCart[language](args);
@@ -271,7 +288,6 @@ export class GroceryBotService {
         action: UserAction.CartClearApproval,
         items: args.list,
       };
-    } else {
     }
 
     return {
@@ -473,7 +489,7 @@ export class GroceryBotService {
     const fs = require('fs').promises;
 
     // Specify the path to the JSON file
-    const filePath = 'src/grocery-bot-v2/mock-data/mock-db-v2.json';
+    const filePath = 'src/grocery-bot-v2/mock-data/mock-db.json';
 
     try {
       // Read the file asynchronously

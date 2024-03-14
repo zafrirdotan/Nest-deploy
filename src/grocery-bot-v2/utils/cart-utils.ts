@@ -59,3 +59,71 @@ function isAnyElementIncluded(arr1, arr2) {
 
   return arr1?.some((element) => arr2?.includes(element));
 }
+
+const fruitEmojis: { [key: string]: string } = {
+  apple: '🍎',
+  banana: '🍌',
+  orange: '🍊',
+  strawberry: '🍓',
+  grapes: '🍇',
+  watermelon: '🍉',
+  lemon: '🍋',
+  melon: '🍈',
+  pineapple: '🍍',
+  mango: '🥭',
+  pear: '🍐',
+  peach: '🍑',
+  cherries: '🍒',
+  kiwi: '🥝',
+  avocado: '🥑',
+  coconut: '🥥',
+  tomato: '🍅',
+  eggplant: '🍆',
+  cucumber: '🥒',
+  carrot: '🥕',
+  corn: '🌽',
+  hotPepper: '🌶️',
+  bellPepper: '🫑',
+  leafyGreen: '🥬',
+  broccoli: '🥦',
+  garlic: '🧄',
+  onion: '🧅',
+  mushroom: '🍄',
+  peanuts: '🥜',
+  chestnut: '🌰',
+  bread: '🍞',
+  croissant: '🥐',
+  baguette: '🥖',
+  pancakes: '🥞',
+  waffle: '🧇',
+  cheese: '🧀',
+  egg: '🥚',
+  friedEgg: '🍳',
+  bacon: '🥓',
+  cutOfMeat: '🥩',
+  poultryLeg: '🍗',
+  meatOnBone: '🍖',
+  hotDog: '🌭',
+  hamburger: '🍔',
+  frenchFries: '🍟',
+  pizza: '🍕',
+  sandwich: '🥪',
+  milk: '🥛',
+  chocolate: '🍫',
+  shampoo: '🧴',
+  soap: '🧼',
+  toothbrush: '🪥',
+};
+
+export function getEmoji(name: string) {
+  if (!name) {
+    return '';
+  }
+  const nameArray = name?.toLocaleLowerCase().split(' ');
+  for (const subName of nameArray) {
+    if (fruitEmojis[subName] || fruitEmojis[subName + 's']) {
+      return fruitEmojis[subName];
+    }
+  }
+  return '';
+}
