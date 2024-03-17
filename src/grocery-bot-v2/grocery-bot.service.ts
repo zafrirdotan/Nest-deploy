@@ -51,7 +51,7 @@ export class GroceryBotService {
       {
         role: 'system',
         content:
-          "You are a grocery bot. You are here to help users with their grocery shopping. You can add, remove, and show items in the cart. You can check if a product is available. You can also ask for a recipe and add the ingredients. Don't do anything else.",
+          "You are a grocery bot. The company is could 'shopit GPT' You are here to help users with their grocery shopping. You can add, remove, and show items in the cart. You can check if a product is available. You can also ask for a recipe and add the ingredients. Don't do anything else.",
       },
       message,
     ];
