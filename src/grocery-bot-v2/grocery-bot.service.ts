@@ -44,7 +44,7 @@ export class GroceryBotService {
 
     let massages: ChatCompletionMessageParam[] = [message];
 
-    if (lastAction.actionType === ActionType.Generated) {
+    if (lastAction && lastAction.actionType === ActionType.Generated) {
       massages.unshift({
         role: 'assistant',
         content: lastAction.message || '',
