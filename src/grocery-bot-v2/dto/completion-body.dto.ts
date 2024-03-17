@@ -14,6 +14,7 @@ export enum UserAction {
   no = 'no',
   showCart = 'show cart',
   CartClearApproval = 'cart clear approval',
+  getPrice = 'what is the price of an item',
 }
 
 export enum ActionType {

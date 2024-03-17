@@ -1,6 +1,14 @@
 import { ICartItem } from 'src/grocery-bot-v2/dto/completion-body.dto';
 
 export function reduceArrays(cart: ICartItem[], removedItems: ICartItem[]) {
+  if (!cart || cart.length === 0) {
+    return [];
+  }
+
+  if (!removedItems || removedItems.length === 0) {
+    return cart;
+  }
+
   const newCart = cart
     .map((cartItem) => {
       const removedItem = removedItems.find(
@@ -38,12 +46,6 @@ export function mergeArrays(cart: ICartItem[], addedItems: ICartItem[]) {
   });
 
   return Array.from(nameToItem.values());
-}
-
-function isAnyElementIncluded(arr1, arr2) {
-  // Check if any element in arr1 is included in arr2
-
-  return arr1?.some((element) => arr2?.includes(element));
 }
 
 const fruitEmojis: { [key: string]: string } = {

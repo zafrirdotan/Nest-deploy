@@ -42,7 +42,19 @@ export class GroceryBotService {
       language = 'he';
     }
 
-    let massages: ChatCompletionMessageParam[] = [message];
+    let massages: ChatCompletionMessageParam[] = [
+      {
+        role: 'system',
+        content:
+          "You should not answer questions about anything other than groceries. Don't write poems or stories on anything.",
+      },
+      {
+        role: 'system',
+        content:
+          "You are a grocery bot. You are here to help users with their grocery shopping. You can add, remove, and show items in the cart. You can check if a product is available. You can also ask for a recipe and add the ingredients. Don't do anything else.",
+      },
+      message,
+    ];
 
     if (lastAction && lastAction.actionType === ActionType.Generated) {
       massages.unshift({
@@ -56,23 +68,6 @@ export class GroceryBotService {
       messages: massages,
       temperature: 0.9,
       functions: [
-        {
-          name: RequestActions.sayHallo,
-          description: Descriptions.sayHallo[language],
-          parameters: {
-            type: OAIParam.object,
-            properties: {
-              action: {
-                type: OAIParam.string,
-                enum: [
-                  UserAction.hallo.toString(),
-                  UserAction.howAreYou.toString(),
-                ],
-              },
-            },
-            required: ['action'],
-          },
-        },
         {
           name: RequestActions.yesNo,
           description: Descriptions.yesNo[language],
@@ -131,6 +126,7 @@ export class GroceryBotService {
                 enum: [
                   UserAction.whatKindOfProduct,
                   UserAction.isProductAvailable,
+                  UserAction.getPrice,
                 ],
               },
               productName: { type: OAIParam.string },
@@ -201,24 +197,11 @@ export class GroceryBotService {
     console.log('functionName', functionName);
 
     const availableFunctions = {
-      sayHallo: this.sayHallo.bind(this),
       yesNo: this.yesNo.bind(this),
       addAndRemove: this.addAndRemove.bind(this),
-      // addOrRemoveX: this.addOrRemoveX.bind(this),
       getAvailableProducts: this.getAvailableProducts.bind(this),
     };
     return availableFunctions[functionName];
-  }
-
-  sayHallo(args) {
-    console.log('args', args);
-
-    const { action } = args;
-    if (action === UserAction.hallo) {
-      return { role: 'system', content: 'Hallo' };
-    } else if (action === UserAction.howAreYou) {
-      return { role: 'system', content: 'I am fine, thank you' };
-    }
   }
 
   addAndRemove(
@@ -361,7 +344,7 @@ export class GroceryBotService {
 
   yesNo(args, _cart: any[], lastAction: Action, language: string) {
     if (args.action === UserAction.yes) {
-      if (lastAction.actionType === ActionType.CartClearApproval) {
+      if (lastAction?.actionType === ActionType.CartClearApproval) {
         return {
           role: 'assistant',
           message: 'Your cart is empty',
@@ -374,6 +357,10 @@ export class GroceryBotService {
         return { role: 'assistant', message: "Ok, I didn't do anything" };
       }
     }
+    return {
+      role: 'assistant',
+      message: 'Hello! How can I assist you with your grocery shopping?',
+    };
   }
 
   async getAvailableProducts(
@@ -384,14 +371,14 @@ export class GroceryBotService {
   ) {
     if (args && args.productName) {
       const items = await this.findItemInCatalog(args.productName);
-      const content = responseDictionary.isProductAvailable[language](
+      const message = responseDictionary.isProductAvailable[language](
         args.productName,
         items,
       );
 
       return {
         role: 'system',
-        content,
+        message,
         cart,
         action: args.action,
         items: args.list,
@@ -445,7 +432,7 @@ export class GroceryBotService {
   }
 
   async findItemInCatalog(searchName: string) {
-    const testAggregation = await this.productModel
+    const aggregation = await this.productModel
       .aggregate([
         {
           $addFields: {
@@ -455,7 +442,7 @@ export class GroceryBotService {
                 {
                   $regexMatch: {
                     input: '$name',
-                    regex: searchName,
+                    regex: `\\b${searchName}\\b`,
                     options: 'i',
                   },
                 },
@@ -518,7 +505,7 @@ export class GroceryBotService {
       ])
       .exec();
 
-    return testAggregation;
+    return aggregation;
   }
 
   async findItemsInCatalogByName(itemNames: string[]) {
