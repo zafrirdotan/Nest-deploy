@@ -3,9 +3,11 @@ import OpenAI from 'openai';
 import { ChatCompletionMessageParam } from 'openai/resources/chat';
 import {
   UserAction,
-  LastAction,
-  GrocerySumBody,
+  GroceryRequestBody,
   ICartItem,
+  ActionType,
+  Action,
+  GroceryResponseBody,
 } from './dto/completion-body.dto';
 import { responseDictionary } from './consts/response-dictionary';
 
@@ -14,12 +16,7 @@ import {
   FunctionEntityTypes as OAIParam,
   RequestActions,
 } from './consts/request-dictionary';
-import {
-  getEmoji,
-  mergeArrays,
-  reduceArrays,
-  removeFromArray,
-} from './utils/cart-utils';
+import { getEmoji, mergeArrays, reduceArrays } from './utils/cart-utils';
 import { containsHebrew } from 'src/utils/language-detection';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -30,49 +27,15 @@ export class GroceryBotService {
   constructor(
     @InjectModel('Product') private readonly productModel: Model<Product>,
   ) {
-    // const product = new this.productModel({
-    //   name: 'banana',
-    //   price: 5,
-    //   searchKeywords: ['banana'],
-    //   //     id?: number;
-    //   // name: string;
-    //   // brand: string;
-    //   // quantity: string;
-    //   // price: string;
-    //   // productId: number;
-    //   // barcode: string;
-    //   // category: string;
-    //   brand: 'brand',
-    //   quantity: 4,
-    //   productId: 1,
-    //   barcode: 'barcode',
-    //   category: 'category',
-    // });
-    // product.save();
-    // this.productModel.find().then((res) => {
-    //   console.log('res', res);
-    // });
     // this.getMockItemsFromFS().then((res) => {
     //   console.log('res', res);
     //   this.productModel.insertMany(res);
     // });
   }
 
-  async test() {
-    const ItemsAvailabilityAndAlternatives =
-      await this.getItemsAvailabilityAndAlternatives([
-        { name: 'banana' },
-        { name: 'apple' },
-        { name: 'milk' },
-        { name: 'green apple' },
-      ]);
-    // console.log(
-    //   'ItemsAvailabilityAndAlternatives:',
-    //   ItemsAvailabilityAndAlternatives,
-    // );
-  }
-
-  async editCartCompletion(completionBody: GrocerySumBody) {
+  async editCartCompletion(
+    completionBody: GroceryRequestBody,
+  ): Promise<GroceryResponseBody> {
     const { message, cart, lastAction } = completionBody;
     let language = 'en';
     if (containsHebrew(message.content)) {
@@ -81,22 +44,13 @@ export class GroceryBotService {
 
     let massages: ChatCompletionMessageParam[] = [message];
 
-    if (
-      [
-        UserAction.addToCart,
-        UserAction.removeFromCart,
-        UserAction.addX,
-        UserAction.removeX,
-      ].includes(lastAction?.action) &&
-      lastAction?.action !== UserAction.clearCart
-    ) {
+    if (lastAction.actionType === ActionType.Generated) {
       massages.unshift({
-        role: 'system',
-        content: `I added: ${lastAction?.list?.map(
-          (item) => `${item.quantity} ${item.name} `,
-        )}`,
+        role: 'assistant',
+        content: lastAction.message || '',
       });
     }
+
     const response = await this.getOpenAI().chat.completions.create({
       model: 'gpt-3.5-turbo-0613',
       messages: massages,
@@ -143,35 +97,13 @@ export class GroceryBotService {
                 type: OAIParam.string,
                 enum: [
                   UserAction.addToCart,
+                  UserAction.addX,
+                  UserAction.addXMore,
+                  UserAction.removeX,
                   UserAction.removeFromCart,
                   UserAction.showCart,
                   UserAction.clearCart,
                 ],
-              },
-              list: {
-                type: OAIParam.array,
-                items: {
-                  type: OAIParam.object,
-                  properties: {
-                    name: { type: OAIParam.string },
-                    quantity: { type: OAIParam.number },
-                    unit: { type: OAIParam.string },
-                  },
-                },
-              },
-            },
-            required: ['action'],
-          },
-        },
-        {
-          name: RequestActions.addOrRemoveX,
-          description: Descriptions.addOrRemoveX[language],
-          parameters: {
-            type: OAIParam.object,
-            properties: {
-              action: {
-                type: OAIParam.string,
-                enum: [UserAction.addX, UserAction.removeX],
               },
               list: {
                 type: OAIParam.array,
@@ -226,35 +158,56 @@ export class GroceryBotService {
 
     const responseMessage = response.choices[0].message;
     if (responseMessage.content) {
-      return responseMessage;
+      return {
+        role: 'system',
+        message: responseMessage.content,
+        cart,
+        action: {
+          actionType: ActionType.Generated,
+          message: responseMessage.content,
+        },
+      };
     }
-    console.log('responseMessage', responseMessage);
 
     if (responseMessage.function_call) {
-      const availableFunctions = {
-        sayHallo: this.sayHallo.bind(this),
-        yesNo: this.yesNo.bind(this),
-        addAndRemove: this.addAndRemove.bind(this),
-        addOrRemoveX: this.addOrRemoveX.bind(this),
-        getRecipe: this.getRecipe.bind(this),
-        getAvailableProducts: this.getAvailableProducts.bind(this),
-      };
-
       const functionName = responseMessage.function_call.name;
+      const functionToCall = this.getFunctionToCall(functionName);
 
-      const functionToCall = availableFunctions[functionName];
-      const functionArgs = JSON.parse(responseMessage.function_call.arguments);
-      console.log('functionArgs', functionArgs);
+      if (functionToCall) {
+        const functionArgs = JSON.parse(
+          responseMessage.function_call.arguments,
+        );
 
-      const functionResponse = await functionToCall(
-        functionArgs,
-        cart,
-        language,
-        lastAction,
-      );
-
-      return functionResponse;
+        const functionResponse = await functionToCall(
+          functionArgs,
+          cart,
+          lastAction,
+          language,
+        );
+        return functionResponse;
+      }
     }
+
+    // if there is no content and no function call
+    return {
+      role: 'system',
+      message: 'Sorry, I could not understand you',
+      cart,
+      action: { actionType: ActionType.Generated },
+    };
+  }
+
+  getFunctionToCall(functionName: string) {
+    console.log('functionName', functionName);
+
+    const availableFunctions = {
+      sayHallo: this.sayHallo.bind(this),
+      yesNo: this.yesNo.bind(this),
+      addAndRemove: this.addAndRemove.bind(this),
+      // addOrRemoveX: this.addOrRemoveX.bind(this),
+      getAvailableProducts: this.getAvailableProducts.bind(this),
+    };
+    return availableFunctions[functionName];
   }
 
   sayHallo(args) {
@@ -268,46 +221,122 @@ export class GroceryBotService {
     }
   }
 
-  async addAndRemove(args, cart?: any[], language?: string) {
-    let message: string = '';
-    let updatedCart: ICartItem[] = cart;
+  addAndRemove(
+    args: {
+      list: [{ name: string; quantity: number; unit: string }];
+      action: UserAction;
+    },
+    cart: any[],
+    lastAction: Action,
+    language: string,
+  ) {
+    switch (args.action) {
+      case UserAction.addToCart:
+      case UserAction.addX:
+        return this.addToCart(args, cart, language);
+      case UserAction.addXMore:
+        return this.addXMore(args, cart, lastAction, language);
+      case UserAction.removeFromCart:
+      case UserAction.removeX:
+        return this.removeFromCart(args, cart, lastAction, language);
+      case UserAction.showCart:
+        return this.showCart(args, cart, lastAction, language);
+      case UserAction.clearCart:
+        return this.askIfUserWantsToClearCart(language);
+      default:
+        return {
+          role: 'assistant',
+          content: 'Sorry, I could not understand you',
+        };
+    }
+  }
 
-    if (args.action === UserAction.addToCart) {
-      const items = await this.getItemsAvailabilityAndAlternatives(args.list);
+  async addToCart(
+    args: {
+      list: [{ name: string; quantity: number; unit: string }];
+      action: UserAction;
+    },
+    cart: any[],
+    language?: string,
+  ) {
+    const items = await this.getItemsAvailabilityAndAlternatives(args.list);
 
-      const availableItems = items
-        .filter((item: ICartItem) => item.isAvailable)
-        .map((item) => {
-          item.emoji = getEmoji(item.name);
-          return item;
-        });
+    const availableItems = items
+      .filter((item: ICartItem) => item.isAvailable)
+      .map((item) => {
+        item.emoji = getEmoji(item.name);
+        return item;
+      });
 
-      const unavailableItems = items
-        .filter((item: ICartItem) => !item.isAvailable)
-        .map((item) => {
-          item.emoji = getEmoji(item.name);
-          return item;
-        });
-      updatedCart = mergeArrays(cart, availableItems);
+    const unavailableItems = items
+      .filter((item: ICartItem) => !item.isAvailable)
+      .map((item) => {
+        item.emoji = getEmoji(item.name);
+        return item;
+      });
 
-      message = responseDictionary.addingItemsToCart[language](
+    return {
+      role: 'assistant',
+      cart: mergeArrays(cart, availableItems),
+      action: {
+        actionType: ActionType.addToCart,
+        items: availableItems.map((item) => item.name),
+      },
+      message: responseDictionary.addingItemsToCart[language](
         availableItems,
         unavailableItems,
-      );
-    } else if (args.action === UserAction.removeFromCart) {
-      updatedCart = removeFromArray(cart, args.list);
+      ),
+    };
+  }
 
-      message = responseDictionary.removingItemsFromCart[language](args);
-    } else if (args.action === UserAction.isProductAvailable) {
-      console.log('args', args);
+  addXMore(args, cart: any[], lastAction: Action, language: string) {
+    if (
+      [ActionType.addX, ActionType.addToCart, ActionType.addXMore].includes(
+        lastAction.actionType,
+      ) &&
+      (!args.list[0].name ||
+        ['product', 'item', ''].includes(args.list[0].name))
+    ) {
+      const newArgs = {
+        action: UserAction.addXMore,
+        list: [
+          {
+            name: lastAction.items[0],
+            quantity: args.list[0].quantity,
+            unit: lastAction.items[0].unit || '',
+          },
+        ],
+      };
+      args = newArgs;
+    }
 
-      if (args && args.list && args.list[0] && args.list[0].name) {
-        const items = await this.findItemInCatalog(args.list[0]?.name);
+    return this.addToCart(args, cart, language);
+  }
 
-        message = responseDictionary.isProductAvailable[language](args, items);
-      }
-    } else if (args.action === UserAction.showCart) {
-      message =
+  removeFromCart(args, cart: any[], lastAction: Action, language: string) {
+    const newCart = reduceArrays(cart, args.list);
+    if (newCart.length === cart.length) {
+      return {
+        role: 'assistant',
+        message: 'Sorry, I could not find the items you asked to remove',
+        cart: newCart,
+        action: args.action,
+        items: args.list,
+      };
+    }
+    return {
+      role: 'assistant',
+      message: responseDictionary.removingItemsFromCart[language](args),
+      cart: newCart,
+      action: args.action,
+      items: args.list,
+    };
+  }
+
+  showCart(args, cart: any[], lastAction: Action, language: string) {
+    return {
+      role: 'assistant',
+      message:
         responseDictionary.showCart[language](args) +
         ` ${cart
           .map(
@@ -316,78 +345,43 @@ export class GroceryBotService {
                 item.price
               }$`,
           )
-          .join(', ')}`;
-    } else if (args.action === UserAction.clearCart) {
-      message = responseDictionary.clearCart[language](args);
-      return {
-        role: 'system',
-        content: message,
-        cart: updatedCart,
-        action: UserAction.CartClearApproval,
-        items: args.list,
-      };
-    }
-
-    return {
-      role: 'system',
-      content: message,
-      cart: updatedCart,
-      action: args.action,
-      items: args.list,
+          .join(', ')}`,
+      action: { actionType: ActionType.showCart },
+      cart,
     };
   }
 
-  yesNo(args, _cart: any[], language: string, lastAction?: LastAction) {
+  askIfUserWantsToClearCart(language: string) {
+    return {
+      role: 'assistant',
+      message: responseDictionary.clearCart[language](),
+      action: { actionType: ActionType.CartClearApproval },
+    };
+  }
+
+  yesNo(args, _cart: any[], lastAction: Action, language: string) {
     if (args.action === UserAction.yes) {
-      if (lastAction.action === UserAction.CartClearApproval) {
+      if (lastAction.actionType === ActionType.CartClearApproval) {
         return {
-          role: 'system',
-          content: 'Your cart is empty',
+          role: 'assistant',
+          message: 'Your cart is empty',
           cart: [],
-          action: UserAction.clearCart,
+          action: { actionType: ActionType.clearCart },
         };
       }
-    } else if (args.action === UserAction.no) {
-      if (lastAction.action === UserAction.CartClearApproval) {
-        return { role: 'system', content: "Ok, I didn't do anything" };
+    } else if (args.action === ActionType.no) {
+      if (lastAction.actionType === ActionType.CartClearApproval) {
+        return { role: 'assistant', message: "Ok, I didn't do anything" };
       }
     }
   }
 
-  async addOrRemoveX(args, cart?: any[], language?: string) {
-    console.log('args', args);
-
-    let message: string = '';
-    let updatedCart: ICartItem[] = cart;
-
-    if (args.action === UserAction.addX) {
-      const items = await this.getItemsAvailabilityAndAlternatives(args.list);
-      const availableItems = items.filter(
-        (item: ICartItem) => item.isAvailable,
-      );
-      const unavailableItems = items.filter(
-        (item: ICartItem) => !item.isAvailable,
-      );
-      updatedCart = mergeArrays(cart, availableItems);
-      message = responseDictionary.addingItemsToCart[language](
-        availableItems,
-        unavailableItems,
-      );
-    } else if (args.action === UserAction.removeX) {
-      updatedCart = reduceArrays(cart, args.list);
-      message = responseDictionary.removingItemsFromCart[language](args);
-    }
-
-    return {
-      role: 'system',
-      content: message,
-      cart: updatedCart,
-      action: args.action,
-      items: args.list,
-    };
-  }
-
-  async getAvailableProducts(args: any, cart?: any[], language?: string) {
+  async getAvailableProducts(
+    args: any,
+    cart: any[],
+    lastAction: Action,
+    language: string,
+  ) {
     if (args && args.productName) {
       const items = await this.findItemInCatalog(args.productName);
       const content = responseDictionary.isProductAvailable[language](
@@ -405,28 +399,9 @@ export class GroceryBotService {
     }
   }
 
-  async getRecipe(args: any) {
-    const answer = await this.getOpenAI().chat.completions.create({
-      model: 'gpt-3.5-turbo-0613',
-      messages: [
-        {
-          role: 'user',
-          content: 'Generate a recipe for ' + args.recipeType,
-        },
-      ],
-      temperature: 0.9,
-    });
-
-    return {
-      role: 'system',
-      content: answer.choices[0].message.content,
-      action: args.action,
-      items: args.list,
-    };
-  }
-
   async getItemsAvailabilityAndAlternatives(items) {
-    items = items.filter((item) => item.name !== 'item');
+    if (!items) return [];
+    items = items?.filter((item) => item.name !== 'item');
 
     const availableItemsMap = await this.findItemsInCatalog(
       items.map((item) => item.name),

@@ -1,39 +1,25 @@
 import { ICartItem } from 'src/grocery-bot-v2/dto/completion-body.dto';
 
 export function reduceArrays(cart: ICartItem[], removedItems: ICartItem[]) {
-  const nameToItem = new Map();
-
-  cart.forEach((item) => {
-    nameToItem.set(item.name?.toLowerCase(), { ...item });
-  });
-
-  removedItems.forEach((item) => {
-    if (nameToItem.has(item.name?.toLowerCase())) {
-      const existingItem = nameToItem.get(item.name?.toLowerCase());
-      existingItem.quantity =
-        (existingItem.quantity || 0) - (item.quantity || 0);
-      if (existingItem.quantity <= 0) {
-        nameToItem.delete(item.name?.toLowerCase());
-      } else {
-        nameToItem.set(item.name?.toLowerCase(), existingItem);
+  const newCart = cart
+    .map((cartItem) => {
+      const removedItem = removedItems.find(
+        (removedItem) =>
+          removedItem.name === cartItem.name ||
+          cartItem.name.includes(removedItem.name) ||
+          cartItem.searchKeywords.includes(removedItem.name),
+      );
+      if (removedItem) {
+        return {
+          ...cartItem,
+          quantity: cartItem.quantity - removedItem.quantity,
+        };
       }
-    }
-  });
+      return cartItem;
+    })
+    .filter((item) => item.quantity > 0);
 
-  return Array.from(nameToItem.values());
-}
-
-export function removeFromArray(cart: ICartItem[], removedItems: ICartItem[]) {
-  // remove from the cart items that are part of the cart items searchKeywords
-  const removedNames = removedItems.map((item) => item.name);
-  const newCart = cart.filter(
-    (item) =>
-      !removedNames.includes(item.name) &&
-      !isAnyElementIncluded(item.searchKeywords, removedNames),
-
-    // add as well the items that are not part of the searchKeywords
-  );
-  return newCart;
+  return Array.from(newCart);
 }
 
 export function mergeArrays(cart: ICartItem[], addedItems: ICartItem[]) {

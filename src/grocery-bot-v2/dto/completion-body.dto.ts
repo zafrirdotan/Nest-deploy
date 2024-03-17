@@ -4,6 +4,7 @@ export enum UserAction {
   removeFromCart = 'remove from cart',
   addX = 'add x',
   removeX = 'remove x',
+  addXMore = 'add x more',
   clearCart = 'clear cart',
   isProductAvailable = 'user asks is product available?',
   whatKindOfProduct = 'user asks what kind of product is available?',
@@ -15,15 +16,33 @@ export enum UserAction {
   CartClearApproval = 'cart clear approval',
 }
 
+export enum ActionType {
+  addToCart = 'addToCart',
+  removeFromCart = 'removeFromCart',
+  addX = 'addX',
+  removeX = 'removeX',
+  addXMore = 'addXMore',
+  clearCart = 'clearCart',
+  isProductAvailable = 'isProductAvailable',
+  whatKindOfProduct = 'whatKindOfProduct',
+  howAreYou = 'howAreYou',
+  hallo = 'hallo',
+  yes = 'yes',
+  no = 'no',
+  showCart = 'showCart',
+  CartClearApproval = 'CartClearApproval',
+  Generated = 'Generated',
+}
+
 export interface CompletionBody {
   messages: ChatCompletionMessageParam[];
   tempUserId?: string; // tempUserId is used for streaming three first messages
 }
 
-export interface GrocerySumBody {
+export interface GroceryRequestBody {
   message: ChatCompletionMessageParam;
   cart: ICartItem[];
-  lastAction: LastAction;
+  lastAction: Action;
 }
 
 export interface ICartItem {
@@ -39,13 +58,15 @@ export interface ICartItem {
   emoji?: string;
 }
 
-export interface LastAction {
-  action: UserAction;
-  list: ICartItem[];
+export interface GroceryResponseBody {
+  role: 'system';
+  message: string;
+  cart: ICartItem[];
+  action: Action;
 }
 
-export type ActionType =
-  | 'add to cart'
-  | 'remove from cart'
-  | 'saying hallo'
-  | 'something else';
+export interface Action {
+  actionType: ActionType;
+  items?: ICartItem[];
+  message?: string;
+}
