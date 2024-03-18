@@ -46,14 +46,8 @@ export class GroceryBotService {
       {
         role: 'system',
         content:
-          "You should not answer questions about anything other than groceries. Don't write poems or stories on anything.",
+          "You're a grocery bot named 'Shopit GPT'. Only assist with grocery shopping—adding, removing, displaying cart items, checking product availability, and providing recipes with ingredient addition. Pass user's 'yes' or 'no' to functions following questions. Avoid unrelated tasks.",
       },
-      {
-        role: 'system',
-        content:
-          "You are a grocery bot. The company is could 'shopit GPT' You are here to help users with their grocery shopping. You can add, remove, and show items in the cart. You can check if a product is available. You can also ask for a recipe and add the ingredients. Don't do anything else.",
-      },
-      message,
     ];
 
     if (lastAction && lastAction.actionType === ActionType.Generated) {
@@ -63,20 +57,29 @@ export class GroceryBotService {
       });
     }
 
+    if (lastAction && lastAction.actionType === ActionType.CartClearApproval) {
+      massages.unshift({
+        role: 'assistant',
+        content: 'Are you sure you want to clear your cart?',
+      });
+    }
+
+    massages.push(message);
+
     const response = await this.getOpenAI().chat.completions.create({
       model: 'gpt-3.5-turbo-0613',
       messages: massages,
       temperature: 0.9,
       functions: [
         {
-          name: RequestActions.yesNo,
-          description: Descriptions.yesNo[language],
+          name: RequestActions.clearCart,
+          description: Descriptions.clearCart[language],
           parameters: {
             type: OAIParam.object,
             properties: {
               action: {
                 type: OAIParam.string,
-                enum: [UserAction.yes, UserAction.no],
+                enum: [UserAction.clearCart, UserAction.clearCartApprove],
               },
             },
             required: ['action'],
@@ -97,7 +100,6 @@ export class GroceryBotService {
                   UserAction.removeX,
                   UserAction.removeFromCart,
                   UserAction.showCart,
-                  UserAction.clearCart,
                 ],
               },
               list: {
@@ -116,18 +118,14 @@ export class GroceryBotService {
           },
         },
         {
-          name: 'getAvailableProducts',
-          description: 'user asks what kind of product is available',
+          name: RequestActions.getAvailableProducts,
+          description: Descriptions.getAvailableProducts[language],
           parameters: {
             type: 'object',
             properties: {
               action: {
                 type: 'string',
-                enum: [
-                  UserAction.whatKindOfProduct,
-                  UserAction.isProductAvailable,
-                  UserAction.getPrice,
-                ],
+                enum: [UserAction.isProductAvailable, UserAction.getPrice],
               },
               productName: { type: OAIParam.string },
             },
@@ -153,6 +151,7 @@ export class GroceryBotService {
     });
 
     const responseMessage = response.choices[0].message;
+    console.log('responseMessage', responseMessage);
     if (responseMessage.content) {
       return {
         role: 'system',
@@ -173,7 +172,6 @@ export class GroceryBotService {
         const functionArgs = JSON.parse(
           responseMessage.function_call.arguments,
         );
-
         const functionResponse = await functionToCall(
           functionArgs,
           cart,
@@ -194,10 +192,8 @@ export class GroceryBotService {
   }
 
   getFunctionToCall(functionName: string) {
-    console.log('functionName', functionName);
-
     const availableFunctions = {
-      yesNo: this.yesNo.bind(this),
+      clearCart: this.clearCart.bind(this),
       addAndRemove: this.addAndRemove.bind(this),
       getAvailableProducts: this.getAvailableProducts.bind(this),
     };
@@ -224,8 +220,6 @@ export class GroceryBotService {
         return this.removeFromCart(args, cart, lastAction, language);
       case UserAction.showCart:
         return this.showCart(args, cart, lastAction, language);
-      case UserAction.clearCart:
-        return this.askIfUserWantsToClearCart(language);
       default:
         return {
           role: 'assistant',
@@ -334,32 +328,27 @@ export class GroceryBotService {
     };
   }
 
+  clearCart(args, cart: any[], lastAction: Action, language: string) {
+    if (
+      lastAction?.actionType === ActionType.CartClearApproval &&
+      args.action === 'yes. I want to clear'
+    ) {
+      return {
+        role: 'assistant',
+        message: responseDictionary.cartCleared[language](),
+        cart: [],
+        action: { actionType: ActionType.clearCart },
+      };
+    } else {
+      return this.askIfUserWantsToClearCart(language);
+    }
+  }
+
   askIfUserWantsToClearCart(language: string) {
     return {
       role: 'assistant',
       message: responseDictionary.clearCart[language](),
       action: { actionType: ActionType.CartClearApproval },
-    };
-  }
-
-  yesNo(args, _cart: any[], lastAction: Action, language: string) {
-    if (args.action === UserAction.yes) {
-      if (lastAction?.actionType === ActionType.CartClearApproval) {
-        return {
-          role: 'assistant',
-          message: 'Your cart is empty',
-          cart: [],
-          action: { actionType: ActionType.clearCart },
-        };
-      }
-    } else if (args.action === ActionType.no) {
-      if (lastAction.actionType === ActionType.CartClearApproval) {
-        return { role: 'assistant', message: "Ok, I didn't do anything" };
-      }
-    }
-    return {
-      role: 'assistant',
-      message: 'Hello! How can I assist you with your grocery shopping?',
     };
   }
 
@@ -369,8 +358,24 @@ export class GroceryBotService {
     lastAction: Action,
     language: string,
   ) {
-    if (args && args.productName) {
-      const items = await this.findItemInCatalog(args.productName);
+    if (!args)
+      return {
+        role: 'assistant',
+        message: 'Sorry, I could not understand you',
+        action: args.action,
+      };
+
+    if (!args.productName) {
+      return {
+        role: 'assistant',
+        message:
+          'We have a verity of products. like vegetables, fruits, meat, and other products. You can ask me for a specific product and I will check if it is available.',
+        action: args.action,
+      };
+    }
+
+    if (args.productName) {
+      const items = await this.findItemInDB(args.productName);
       const message = responseDictionary.isProductAvailable[language](
         args.productName,
         items,
@@ -419,19 +424,13 @@ export class GroceryBotService {
   async findItemsInCatalog(itemNames: string[]) {
     const itemsMap = {};
     for (const name of itemNames) {
-      itemsMap[name] = await this.findItemInCatalog(name);
+      itemsMap[name] = await this.findItemInDB(name);
     }
 
     return itemsMap;
   }
 
-  async findOneItemInCatalog(name: string) {
-    const items = await this.getMockItemsFromFS();
-    this.findItemInCatalog(name);
-    return items;
-  }
-
-  async findItemInCatalog(searchName: string) {
+  async findItemInDB(searchName: string) {
     const aggregation = await this.productModel
       .aggregate([
         {
@@ -506,18 +505,6 @@ export class GroceryBotService {
       .exec();
 
     return aggregation;
-  }
-
-  async findItemsInCatalogByName(itemNames: string[]) {
-    const dbItems = await this.getMockItemsFromFS();
-
-    const itemsMap = {};
-    itemNames.forEach((name) => {
-      itemsMap[name] = dbItems.filter(
-        (item) => item?.name?.toLowerCase() === name?.toLowerCase(),
-      );
-    });
-    return itemsMap;
   }
 
   async getMockItemsFromFS(): Promise<any[]> {

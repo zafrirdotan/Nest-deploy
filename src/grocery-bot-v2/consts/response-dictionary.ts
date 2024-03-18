@@ -80,6 +80,10 @@ export const responseDictionary: Record<
     he: () => 'האם אתה בטוח שברצונך לרוקן את העגלה שלך?',
     en: () => 'Are you shore you want to clear your cart?',
   },
+  cartCleared: {
+    he: () => 'העגלה רוקנה',
+    en: () => 'Your cart has been cleared',
+  },
   isProductAvailable: {
     en: (productName: string, items) => {
       if (items?.length) {
@@ -111,6 +115,7 @@ enum ResponseDictionary {
   showCart = 'showCart',
   clearCart = 'clearCart',
   isProductAvailable = 'isProductAvailable',
+  cartCleared = 'cartCleared',
 }
 
 export enum Language {

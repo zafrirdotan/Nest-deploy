@@ -5,16 +5,15 @@ export enum UserAction {
   addX = 'add x',
   removeX = 'remove x',
   addXMore = 'add x more',
-  clearCart = 'clear cart',
   isProductAvailable = 'user asks is product available?',
   whatKindOfProduct = 'user asks what kind of product is available?',
   howAreYou = 'user asking how are you',
-  hallo = 'user saying hallo',
-  yes = 'yes',
-  no = 'no',
   showCart = 'show cart',
   CartClearApproval = 'cart clear approval',
   getPrice = 'what is the price of an item',
+  getAvailableProducts = 'get available products',
+  clearCart = 'user wants to clear the cart',
+  clearCartApprove = 'yes. I want to clear',
 }
 
 export enum ActionType {
