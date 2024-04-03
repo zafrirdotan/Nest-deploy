@@ -9,6 +9,7 @@ export interface Product {
   productId: number;
   barcode: string;
   category: string;
+  subCategory: string;
   searchKeywords: Array<String>;
 }
 
@@ -21,5 +22,6 @@ export const ProductSchema = new mongoose.Schema({
   productId: Number,
   barcode: String,
   category: String,
+  subCategory: String,
   searchKeywords: Array<String>,
 });

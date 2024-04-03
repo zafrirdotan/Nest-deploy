@@ -2,104 +2,101 @@ import { Injectable } from '@nestjs/common';
 import OpenAI from 'openai';
 import { ChatCompletionMessageParam } from 'openai/resources/chat';
 import {
-  UserAction,
-  GroceryRequestBody,
+  UserActionStrings,
   ICartItem,
-  ActionType,
-  Action,
-  GroceryResponseBody,
+  UserAction,
+  AssistantAction,
+  IAvailableItems,
+  GroceryBotCompletion,
+  AssistantMessageParams,
 } from './dto/completion-body.dto';
 import { responseDictionary } from './consts/response-dictionary';
 
 import {
-  Descriptions,
+  UserActionArgs,
   FunctionEntityTypes as OAIParam,
-  RequestActions,
+  PredictItemEntity,
 } from './consts/request-dictionary';
-import { getEmoji, mergeArrays, reduceArrays } from './utils/cart-utils';
-import { containsHebrew } from 'src/utils/language-detection';
+import { addToCart, reduceFromCart, removeProduct } from './utils/cart-utils';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Product } from './entity/product.entity';
 
 @Injectable()
 export class GroceryBotService {
+  defaultMessage: AssistantMessageParams = {
+    role: 'assistant',
+    content: 'Sorry, I could not understand you',
+    actionType: AssistantAction.notUnderstood,
+  };
+
   constructor(
     @InjectModel('Product') private readonly productModel: Model<Product>,
   ) {
     // this.getMockItemsFromFS().then((res) => {
-    //   console.log('res', res);
     //   this.productModel.insertMany(res);
     // });
   }
 
-  async editCartCompletion(
-    completionBody: GroceryRequestBody,
-  ): Promise<GroceryResponseBody> {
-    const { message, cart, lastAction } = completionBody;
+  async groceryBotCompletion(
+    completionBody: GroceryBotCompletion,
+  ): Promise<AssistantMessageParams> {
+    const { messages } = completionBody;
+    if (!messages?.length) {
+      throw new Error('No messages provided');
+    }
+
+    const lastMassages = messages.slice(-6);
+
     let language = 'en';
-    if (containsHebrew(message.content)) {
-      language = 'he';
-    }
+    // if (containsHebrew(message.content)) {
+    //   language = 'he';
+    // }
+    const currentMessage = messages[messages.length - 1];
+    const lastMassage = messages[messages.length - 2];
+    console.log('completionBody.cart:', completionBody.cart);
 
-    let massages: ChatCompletionMessageParam[] = [
-      {
-        role: 'system',
-        content:
-          "You're a grocery bot named 'Shopit GPT'. Only assist with grocery shopping—adding, removing, displaying cart items, checking product availability, and providing recipes with ingredient addition. Pass user's 'yes' or 'no' to functions following questions. Avoid unrelated tasks.",
+    console.log('currentMessage', currentMessage);
+
+    const completionMessages: ChatCompletionMessageParam[] = lastMassages.map(
+      (message) => {
+        if (message.role === 'user') {
+          return {
+            role: 'user',
+            content: message.content || '',
+          };
+        } else {
+          return {
+            role: 'assistant',
+            content: message.content || '',
+          };
+        }
       },
-    ];
+    );
 
-    if (lastAction && lastAction.actionType === ActionType.Generated) {
-      massages.unshift({
-        role: 'assistant',
-        content: lastAction.message || '',
-      });
-    }
-
-    if (lastAction && lastAction.actionType === ActionType.CartClearApproval) {
-      massages.unshift({
-        role: 'assistant',
-        content: 'Are you sure you want to clear your cart?',
-      });
-    }
-
-    massages.push(message);
+    completionMessages.push({
+      role: 'system',
+      content:
+        "You're a grocery bot named 'Shopit GPT'. Assist with grocery shopping—adding, removing, displaying cart items, checking product availability, and provide recipes or cooking instructions if requested. Avoid unrelated tasks.",
+    });
 
     const response = await this.getOpenAI().chat.completions.create({
-      model: 'gpt-3.5-turbo-0613',
-      messages: massages,
+      model: 'gpt-3.5-turbo-1106',
+      messages: completionMessages,
       temperature: 0.9,
       functions: [
         {
-          name: RequestActions.clearCart,
-          description: Descriptions.clearCart[language],
-          parameters: {
-            type: OAIParam.object,
-            properties: {
-              action: {
-                type: OAIParam.string,
-                enum: [UserAction.clearCart, UserAction.clearCartApprove],
-              },
-            },
-            required: ['action'],
-          },
-        },
-        {
-          name: RequestActions.addAndRemove,
-          description: Descriptions.addAndRemove[language],
+          name: 'add',
+          description: 'Add items to the cart',
           parameters: {
             type: OAIParam.object,
             properties: {
               action: {
                 type: OAIParam.string,
                 enum: [
-                  UserAction.addToCart,
-                  UserAction.addX,
-                  UserAction.addXMore,
-                  UserAction.removeX,
-                  UserAction.removeFromCart,
-                  UserAction.showCart,
+                  UserActionStrings.addToCart,
+                  UserActionStrings.addMore,
+                  UserActionStrings.addAnotherX,
                 ],
               },
               list: {
@@ -114,206 +111,393 @@ export class GroceryBotService {
                 },
               },
             },
-            required: ['action'],
+            required: ['action', 'list'],
           },
         },
         {
-          name: RequestActions.getAvailableProducts,
-          description: Descriptions.getAvailableProducts[language],
+          name: 'remove',
+          description: 'Remove items from the cart',
           parameters: {
-            type: 'object',
+            type: OAIParam.object,
             properties: {
               action: {
-                type: 'string',
-                enum: [UserAction.isProductAvailable, UserAction.getPrice],
+                type: OAIParam.string,
+                enum: [
+                  UserActionStrings.removeX,
+                  UserActionStrings.removeFromCart,
+                ],
               },
-              productName: { type: OAIParam.string },
+              list: {
+                type: OAIParam.array,
+                items: {
+                  type: OAIParam.object,
+                  properties: {
+                    name: { type: OAIParam.string },
+                    quantity: { type: OAIParam.number },
+                    unit: { type: OAIParam.string },
+                    removeAll: { type: OAIParam.boolean },
+                  },
+                },
+              },
+            },
+            required: ['action', 'list'],
+          },
+        },
+        {
+          name: 'showCart',
+          description: 'Show the cart',
+        },
+        {
+          name: 'clearCart',
+          description: 'Clear the cart',
+          parameters: {
+            type: OAIParam.object,
+            properties: {
+              action: {
+                type: OAIParam.string,
+                enum: [
+                  UserActionStrings.clearCart,
+                  UserActionStrings.clearCartApprove,
+                ],
+              },
             },
             required: ['action'],
           },
         },
-        // {
-        //   name: 'getRecipe',
-        //   description: 'user asks for a recipe',
-        //   parameters: {
-        //     type: 'object',
-        //     properties: {
-        //       action: {
-        //         type: 'string',
-        //         enum: ['do you have', 'recipe'],
-        //       },
-        //       recipeType: { type: 'string' },
-        //     },
-        //     required: ['action'],
-        //   },
-        // },
+        {
+          name: 'getAvailableProducts',
+          description: UserActionStrings.getAvailableProducts,
+          parameters: {
+            type: OAIParam.object,
+            properties: {
+              list: {
+                type: OAIParam.array,
+                items: {
+                  type: OAIParam.object,
+                  properties: {
+                    name: { type: OAIParam.string },
+                    quantity: { type: OAIParam.number },
+                    unit: { type: OAIParam.string },
+                  },
+                },
+              },
+            },
+            required: ['list'],
+          },
+        },
+        {
+          name: 'getPrice',
+          description: 'Get the price of the items',
+          parameters: {
+            type: OAIParam.object,
+            properties: {
+              list: {
+                type: OAIParam.array,
+                items: {
+                  type: OAIParam.object,
+                  properties: {
+                    name: { type: OAIParam.string },
+                  },
+                },
+              },
+            },
+            required: ['list'],
+          },
+        },
       ],
     });
 
     const responseMessage = response.choices[0].message;
-    console.log('responseMessage', responseMessage);
+
     if (responseMessage.content) {
+      console.log('generated message', responseMessage.content);
+
       return {
-        role: 'system',
-        message: responseMessage.content,
-        cart,
-        action: {
-          actionType: ActionType.Generated,
-          message: responseMessage.content,
-        },
+        role: 'assistant',
+        content: responseMessage.content,
+        actionType: AssistantAction.generated,
       };
     }
 
     if (responseMessage.function_call) {
       const functionName = responseMessage.function_call.name;
-      const functionToCall = this.getFunctionToCall(functionName);
 
-      if (functionToCall) {
-        const functionArgs = JSON.parse(
-          responseMessage.function_call.arguments,
-        );
-        const functionResponse = await functionToCall(
-          functionArgs,
-          cart,
-          lastAction,
-          language,
-        );
-        return functionResponse;
-      }
+      const functionArgs = JSON.parse(responseMessage.function_call.arguments);
+
+      const functionResponse = await this.responseFunction.bind(this)(
+        functionName,
+        functionArgs,
+        completionBody.cart,
+        lastMassage,
+        language,
+      );
+      return functionResponse;
     }
 
     // if there is no content and no function call
-    return {
-      role: 'system',
-      message: 'Sorry, I could not understand you',
-      cart,
-      action: { actionType: ActionType.Generated },
-    };
+    return this.defaultMessage;
   }
 
-  getFunctionToCall(functionName: string) {
-    const availableFunctions = {
-      clearCart: this.clearCart.bind(this),
-      addAndRemove: this.addAndRemove.bind(this),
-      getAvailableProducts: this.getAvailableProducts.bind(this),
-    };
-    return availableFunctions[functionName];
-  }
-
-  addAndRemove(
-    args: {
-      list: [{ name: string; quantity: number; unit: string }];
-      action: UserAction;
-    },
+  async responseFunction(
+    functionName: string,
+    functionArgs: UserActionArgs,
     cart: any[],
-    lastAction: Action,
+    lastMassage: AssistantMessageParams,
     language: string,
   ) {
-    switch (args.action) {
-      case UserAction.addToCart:
-      case UserAction.addX:
-        return this.addToCart(args, cart, language);
-      case UserAction.addXMore:
-        return this.addXMore(args, cart, lastAction, language);
-      case UserAction.removeFromCart:
-      case UserAction.removeX:
-        return this.removeFromCart(args, cart, lastAction, language);
-      case UserAction.showCart:
-        return this.showCart(args, cart, lastAction, language);
+    console.log('lastMassage', lastMassage);
+    console.log('functionName', functionName);
+    console.log('functionArgs', functionArgs);
+
+    switch (functionName) {
+      case 'add':
+        return this.handleAddToCart(functionArgs, lastMassage, cart, language);
+      case 'remove':
+        return this.removeFromCart(functionArgs, cart, language);
+      case 'showCart':
+        return this.showCart(functionArgs, cart, language);
+      case 'clearCart':
+        return this.clearCart(functionArgs, lastMassage, language);
+      case 'getAvailableProducts':
+        return this.handleGetAvailableProducts(functionArgs);
+      case 'getPrice':
+        return this.handleGetAvailableProducts(functionArgs);
+
       default:
-        return {
-          role: 'assistant',
-          content: 'Sorry, I could not understand you',
-        };
+        return this.defaultMessage;
     }
   }
 
-  async addToCart(
-    args: {
-      list: [{ name: string; quantity: number; unit: string }];
-      action: UserAction;
-    },
-    cart: any[],
+  async handleAddToCart(
+    functionArgs: UserActionArgs,
+    lastMassage: AssistantMessageParams,
+    cart: ICartItem[],
     language?: string,
   ) {
-    const items = await this.getItemsAvailabilityAndAlternatives(args.list);
+    if (!functionArgs?.action || !functionArgs.list) {
+      console.log(
+        'error - functionArgs are empty or missing action',
+        'functionArgs:',
+        functionArgs,
+      );
+      return this.defaultMessage;
+    }
+    const { action } = functionArgs;
 
-    const availableItems = items
-      .filter((item: ICartItem) => item.isAvailable)
-      .map((item) => {
-        item.emoji = getEmoji(item.name);
-        return item;
-      });
+    const requestedItems = functionArgs?.list;
+    const searchTerms = requestedItems?.map((item) => item.name);
 
-    const unavailableItems = items
-      .filter((item: ICartItem) => !item.isAvailable)
-      .map((item) => {
-        item.emoji = getEmoji(item.name);
-        return item;
-      });
+    const lastAssistantAction = lastMassage?.actionType;
 
+    if (
+      [UserActionStrings.addMore, UserActionStrings.addAnotherX].includes(
+        action,
+      )
+    ) {
+      // direct add to cart
+      return this.addToCart(cart, requestedItems, cart);
+    } else if (lastAssistantAction === AssistantAction.showAvailableProducts) {
+      // add to cart
+      const assistantMessage = this.addToCart(
+        lastMassage.availableItems.flatMap((item) => item.items),
+        requestedItems,
+        cart,
+      );
+      // if the item are not available in the available options then check the inventory
+      if (assistantMessage.actionType === AssistantAction.notFoundInCart) {
+        return this.checkItemsAvailability(searchTerms);
+      } else {
+        return assistantMessage;
+      }
+    } else {
+      // if the user action is not addMore or addAnotherX
+      // then check the inventory
+      return this.checkItemsAvailability(searchTerms);
+    }
+  }
+
+  addToCart(
+    availableItems: ICartItem[],
+    requestedItems: PredictItemEntity[],
+    cart: ICartItem[],
+  ) {
+    const itemsToAdd = this.getRequestedItems(availableItems, requestedItems);
+    if (!itemsToAdd?.length) {
+      return {
+        role: 'assistant',
+        content: `Sorry, I could not find ${requestedItems[0].name} in your cart.
+        \n Do you want me to check if ${requestedItems[0].name} is available?`,
+        actionType: AssistantAction.notFoundInCart,
+      };
+    }
+
+    const newCart = addToCart(cart, itemsToAdd);
     return {
       role: 'assistant',
-      cart: mergeArrays(cart, availableItems),
-      action: {
-        actionType: ActionType.addToCart,
-        items: availableItems.map((item) => item.name),
-      },
-      message: responseDictionary.addingItemsToCart[language](
-        availableItems,
-        unavailableItems,
-      ),
+      content:
+        itemsToAdd.length === 1
+          ? `I added ${itemsToAdd[0].name} to your cart`
+          : `I added the following items to your cart ${itemsToAdd.map(
+              (item) => `\n- ${item.name}`,
+            )}`,
+      actionType: AssistantAction.addedToCart,
+      cart: newCart,
+      addedItems: itemsToAdd,
     };
   }
 
-  addXMore(args, cart: any[], lastAction: Action, language: string) {
-    if (
-      [ActionType.addX, ActionType.addToCart, ActionType.addXMore].includes(
-        lastAction.actionType,
-      ) &&
-      (!args.list[0].name ||
-        ['product', 'item', ''].includes(args.list[0].name))
-    ) {
-      const newArgs = {
-        action: UserAction.addXMore,
-        list: [
-          {
-            name: lastAction.items[0],
-            quantity: args.list[0].quantity,
-            unit: lastAction.items[0].unit || '',
-          },
-        ],
-      };
-      args = newArgs;
-    }
+  handleGetAvailableProducts(functionArgs: UserActionArgs) {
+    const searchTerms = functionArgs.list?.map((item) => item.name);
 
-    return this.addToCart(args, cart, language);
+    return this.checkItemsAvailability(searchTerms);
   }
 
-  removeFromCart(args, cart: any[], lastAction: Action, language: string) {
-    const newCart = reduceArrays(cart, args.list);
-    if (newCart.length === cart.length) {
+  async checkItemsAvailability(searchTerms: string[]) {
+    if (!searchTerms?.length) {
+      return this.defaultMessage;
+    }
+
+    const availableItems = await this.findAvailableItemsInDB(searchTerms);
+
+    const unavailableItems = searchTerms?.filter(
+      (term) => !availableItems.find((item) => item.searchTerm === term),
+    );
+
+    if (!availableItems.length) {
       return {
         role: 'assistant',
-        message: 'Sorry, I could not find the items you asked to remove',
-        cart: newCart,
-        action: args.action,
-        items: args.list,
+        content: `Sorry, I didn't find any items for ${searchTerms.map(
+          (searchTerms) => `\n- ${searchTerms}`,
+        )}`,
+        actionType: AssistantAction.notFoundInInventory,
+      };
+    }
+
+    if (searchTerms.length === 1) {
+      if (availableItems[0].items.length === 1) {
+        return {
+          role: 'assistant',
+          content: `I found ${availableItems[0].items[0].name} for ${availableItems[0].items[0].price}$ 
+         \n do you want to add it to your cart?`,
+          actionType: AssistantAction.showAvailableProducts,
+          availableItems,
+          unavailableItems,
+        };
+      } else {
+        const content = `I found a couple of items in this category ${
+          availableItems[0].searchTerm
+        } ${availableItems[0].items.map((item) => {
+          return `\n- ${item.name} for ${item.price}$
+         `;
+        })} \n do you want to add one of them to the cart?`;
+
+        return {
+          role: 'assistant',
+          content,
+          availableItems,
+          unavailableItems,
+          actionType: AssistantAction.showAvailableProducts,
+        };
+      }
+    } else {
+      const message = `I found the following items: 
+      \n ${availableItems.map((category) => {
+        return `\n\n For ${category.searchTerm} I Found ${category.items.map(
+          (item) => {
+            return ` \n- ${item.name} for ${item.price}$`;
+          },
+        )}`;
+      })}  \n do you want to add one of them to the cart?`;
+
+      return {
+        role: 'assistant',
+        content: message,
+        actionType: AssistantAction.showAvailableProducts,
+        availableItems,
+        unavailableItems,
+      };
+    }
+  }
+
+  addXMore(
+    functionArgs: UserActionArgs,
+    lastMassage: AssistantMessageParams,
+    cart: any[],
+    language: string,
+  ) {
+    if (!functionArgs) {
+      console.log('error - functionArgs are empty');
+      return this.defaultMessage;
+    }
+    const { list, action } = functionArgs;
+
+    if (!list?.length) {
+      console.log('error - functionArgs.list is empty');
+
+      return this.defaultMessage;
+    }
+
+    if (!action) {
+      console.log('error - functionArgs.action is empty');
+      return this.defaultMessage;
+    }
+
+    const itemIndex = cart.findIndex((item) =>
+      item.name?.toLowerCase().includes(list[0].name?.toLocaleLowerCase()),
+    );
+
+    cart[itemIndex].quantity += +list[0].quantity; // problem
+
+    return {
+      role: 'assistant',
+      content: `I added ${functionArgs?.list[0].quantity} ${functionArgs.list[0].name} to your cart`,
+      action: lastMassage,
+      cart,
+    };
+  }
+
+  removeFromCart(args: UserActionArgs, cart: any[], language: string) {
+    const { reducedItems, newCart } = reduceFromCart(cart, args.list);
+
+    if (!reducedItems?.length) {
+      return {
+        role: 'assistant',
+        content: 'Sorry, I could not find the items you asked to remove',
+        action: AssistantAction.notFoundInCart,
       };
     }
     return {
       role: 'assistant',
-      message: responseDictionary.removingItemsFromCart[language](args),
+      content: `I removed the following items from your cart ${reducedItems.map(
+        (item) => `\n- ${item.name} ${item.quantity}`,
+      )}
+      \n Do you need anything else?`,
       cart: newCart,
       action: args.action,
       items: args.list,
     };
   }
 
-  showCart(args, cart: any[], lastAction: Action, language: string) {
+  removeProduct(args: UserActionArgs, cart: any[], language: string) {
+    const newCart = removeProduct(cart, args.list[0].name);
+    if (newCart.length === cart.length) {
+      return {
+        role: 'assistant',
+        content: `Sorry, I could not find ${args.list[0].name} in your cart`,
+      };
+    }
+
     return {
       role: 'assistant',
-      message:
+      content: `I removed ${args.list[0].name} from your cart`,
+      cart: newCart,
+    };
+  }
+
+  showCart(args, cart: any[], language: string) {
+    return {
+      role: 'assistant',
+      content:
         responseDictionary.showCart[language](args) +
         ` ${cart
           .map(
@@ -323,21 +507,18 @@ export class GroceryBotService {
               }$`,
           )
           .join(', ')}`,
-      action: { actionType: ActionType.showCart },
+      action: { actionType: UserAction.showCart },
       cart,
     };
   }
 
-  clearCart(args, cart: any[], lastAction: Action, language: string) {
-    if (
-      lastAction?.actionType === ActionType.CartClearApproval &&
-      args.action === 'yes. I want to clear'
-    ) {
+  clearCart(args, lastAction: AssistantMessageParams, language: string) {
+    if (lastAction?.actionType === AssistantAction.cartClearApproval) {
       return {
         role: 'assistant',
-        message: responseDictionary.cartCleared[language](),
+        content: responseDictionary.cartCleared[language](),
         cart: [],
-        action: { actionType: ActionType.clearCart },
+        actionType: AssistantAction.clearedCart,
       };
     } else {
       return this.askIfUserWantsToClearCart(language);
@@ -347,73 +528,12 @@ export class GroceryBotService {
   askIfUserWantsToClearCart(language: string) {
     return {
       role: 'assistant',
-      message: responseDictionary.clearCart[language](),
-      action: { actionType: ActionType.CartClearApproval },
+      content: responseDictionary.clearCart[language](),
+      actionType: AssistantAction.cartClearApproval,
     };
   }
 
-  async getAvailableProducts(
-    args: any,
-    cart: any[],
-    lastAction: Action,
-    language: string,
-  ) {
-    if (!args)
-      return {
-        role: 'assistant',
-        message: 'Sorry, I could not understand you',
-        action: args.action,
-      };
-
-    if (!args.productName) {
-      return {
-        role: 'assistant',
-        message:
-          'We have a verity of products. like vegetables, fruits, meat, and other products. You can ask me for a specific product and I will check if it is available.',
-        action: args.action,
-      };
-    }
-
-    if (args.productName) {
-      const items = await this.findItemInDB(args.productName);
-      const message = responseDictionary.isProductAvailable[language](
-        args.productName,
-        items,
-      );
-
-      return {
-        role: 'system',
-        message,
-        cart,
-        action: args.action,
-        items: args.list,
-      };
-    }
-  }
-
-  async getItemsAvailabilityAndAlternatives(items) {
-    if (!items) return [];
-    items = items?.filter((item) => item.name !== 'item');
-
-    const availableItemsMap = await this.findItemsInCatalog(
-      items.map((item) => item.name),
-    );
-
-    return items.map((item) => {
-      return {
-        ...item,
-        name: availableItemsMap[item.name][0]
-          ? availableItemsMap[item.name][0]?.name
-          : item.name,
-        isAvailable: availableItemsMap[item.name].length > 0,
-        alternatives: availableItemsMap[item.name].slice(1, 3),
-        price: availableItemsMap[item.name][0]
-          ? availableItemsMap[item.name][0]?.price
-          : null,
-        searchKeywords: availableItemsMap[item.name][0]?.searchKeywords,
-      };
-    });
-  }
+  async getAvailableProducts(args: any) {}
 
   getOpenAI(): OpenAI {
     return new OpenAI({
@@ -421,91 +541,202 @@ export class GroceryBotService {
     });
   }
 
-  async findItemsInCatalog(itemNames: string[]) {
-    const itemsMap = {};
-    for (const name of itemNames) {
-      itemsMap[name] = await this.findItemInDB(name);
-    }
+  getRequestedItems(
+    availableItems: ICartItem[],
+    requestedProducts: PredictItemEntity[],
+  ) {
+    console.log('availableItems 5', availableItems);
+    console.log('requestedProducts 5', requestedProducts);
 
-    return itemsMap;
+    if (!availableItems?.length || !requestedProducts.length) {
+      return [];
+    }
+    const availableItemsDeepCopy = JSON.parse(JSON.stringify(availableItems));
+
+    const itemsToAdd = requestedProducts.map((requestedItem) => {
+      const item = availableItemsDeepCopy.find((item) => {
+        const isNameEqual = item.name
+          .toLowerCase()
+          .includes(requestedItem.name.toLowerCase());
+        if (isNameEqual) {
+          return true;
+        } else {
+          const isSearchKeywordsEqual = item.searchKeywords
+            .map((keyword) => keyword.toLowerCase())
+            .includes(requestedItem.name.toLowerCase());
+          if (isSearchKeywordsEqual) {
+            return true;
+          }
+          return false;
+        }
+      });
+
+      if (!item) {
+        return;
+      }
+
+      item.quantity = requestedItem.quantity;
+
+      return item;
+    });
+    return itemsToAdd.filter((item) => item);
   }
 
-  async findItemInDB(searchName: string) {
+  async findAvailableItemsInDB(
+    searchTerms: string[],
+  ): Promise<Array<IAvailableItems>> {
+    if (!searchTerms?.length) {
+      return [];
+    }
+    const searchTerm = searchTerms?.join('|');
+
     const aggregation = await this.productModel
       .aggregate([
         {
-          $addFields: {
-            // Condition 0: exact match, case-insensitive
-            isExactMatch: {
-              $cond: [
-                {
-                  $regexMatch: {
-                    input: '$name',
-                    regex: `\\b${searchName}\\b`,
-                    options: 'i',
-                  },
-                },
-                // Priority fields: 1 if condition is met, 0 otherwise
-                1,
-                0,
-              ],
-            },
-            // Condition 1: Search name exists in the `subCategory` array
-            isSubCategory: {
-              $cond: [
-                {
-                  $regexMatch: {
-                    input: '$subCategory',
-                    regex: `searchName`,
-                    options: 'i',
-                  },
-                },
-                // Priority fields: 1 if condition is met, 0 otherwise
-                1,
-                0,
-              ],
-            },
-            // Condition 2: Search key exists in the `searchKeys` array
-            includedInSearchKey: {
-              $cond: [{ $in: [searchName, '$searchKeywords'] }, 1, 0],
-            },
-          },
-        },
-        {
           $match: {
-            // Ensure at least one priority field is 1
             $or: [
-              { isExactMatch: 1 },
-              { isSubCategory: 1 },
-              { includedInSearchKey: 1 },
+              this.startsWithCond('name', searchTerm),
+              this.exactMatchCond('subCategory', searchTerm),
+              this.exactMatchCond('searchKeywords', searchTerm),
+              this.exactMatchCond('category', searchTerm),
             ],
           },
         },
         {
-          // Sort by priority fields: descending order (1 is higher priority than 0)
-          $sort: {
-            isExactMatch: -1,
-            isSubCategory: -1,
-            includedInSearchKey: -1,
+          $addFields: {
+            matchReason: {
+              $switch: {
+                branches: [
+                  {
+                    case: this.startsWithCase('name', searchTerm),
+                    then: 'name',
+                  },
+                  {
+                    case: this.exactMatchCase('subCategory', searchTerm),
+                    then: 'subCategory',
+                  },
+                  {
+                    case: this.exactMatchCaseArray(
+                      'searchKeywords',
+                      searchTerm,
+                    ),
+                    then: 'searchKeywords',
+                  },
+                  {
+                    case: this.exactMatchCase('category', searchTerm),
+                    then: 'category',
+                  },
+                ],
+              },
+            },
+            searchTerm: {
+              $switch: {
+                branches: [
+                  ...searchTerms.map((term) => {
+                    return [
+                      {
+                        case: this.startsWithCase('name', term),
+                        then: term,
+                      },
+                      {
+                        case: this.exactMatchCase('subCategory', term),
+                        then: term,
+                      },
+                      {
+                        case: this.exactMatchCaseArray('searchKeywords', term),
+                        then: term,
+                      },
+                      {
+                        case: this.exactMatchCase('category', term),
+                        then: term,
+                      },
+                    ];
+                  }),
+                ].flat(),
+                default: 'none',
+              },
+            },
           },
         },
-        // {
-        //   $project: {
-        //     // Exclude 'searchKeywords' from the results
-        //     // searchKeywords: 0,
-        //     // priority1: 0,
-        //     // priority2: 0,
-        //     // priority3: 0,
-        //     // Optional: Explicitly include fields if needed
-        //     // name: 1,
-        //     // otherField: 1,
-        //   },
-        // },
+
+        {
+          $group: {
+            _id: '$searchTerm', // Group by the "searchTerm" field
+            count: { $count: {} },
+            items: { $push: '$$ROOT' },
+          },
+        },
+        {
+          $project: {
+            _id: 0, // Exclude the _id field from the output
+            searchTerm: '$_id', // Rename _id to itemName
+            count: 1, // Include the count field in the output
+            items: 1, // Include the items array in the output
+          },
+        },
       ])
+
       .exec();
 
     return aggregation;
   }
+
+  startsWithCond(field: string, searchTerm: string) {
+    return {
+      [field]: {
+        $regex: `^(${searchTerm})`,
+        $options: 'i', // Case-insensitive match
+      },
+    };
+  }
+
+  exactMatchCond(field: string, searchTerm: string) {
+    return {
+      [field]: {
+        $regex: `^(${searchTerm})$`,
+        $options: 'i', // Case-insensitive match
+      },
+    };
+  }
+
+  startsWithCase(field: string, searchTerm: string) {
+    return {
+      $regexMatch: {
+        input: `$${field}`,
+        regex: new RegExp(`^(${searchTerm})`, 'i'),
+      },
+    };
+  }
+
+  exactMatchCase(field: string, searchTerm: string) {
+    return {
+      $regexMatch: {
+        input: `$${field}`,
+        regex: new RegExp(`^(${searchTerm})$`, 'i'),
+      },
+    };
+  }
+
+  exactMatchCaseArray(field: string, searchTerm: string) {
+    return {
+      $anyElementTrue: {
+        $map: {
+          input: `$${field}`,
+          as: 'keyword',
+          in: {
+            $regexMatch: {
+              input: '$$keyword',
+              regex: new RegExp('^' + searchTerm + '$', 'i'), // Notice the '$' inside the RegExp to match the exact term at the end of the string
+            },
+          },
+        },
+      },
+    };
+  }
+
+  startsWithRegex = (searchTerm: string) => `^(${searchTerm})`;
+
+  exactMatchRegex = (searchTerm: string) => `^(${searchTerm})$`;
 
   async getMockItemsFromFS(): Promise<any[]> {
     const fs = require('fs').promises;
@@ -520,7 +751,6 @@ export class GroceryBotService {
       // Parse the JSON string to an object
       const jsonObject = JSON.parse(data);
 
-      // console.log(jsonObject);
       return jsonObject;
     } catch (err) {
       console.error('Error reading the file:', err);

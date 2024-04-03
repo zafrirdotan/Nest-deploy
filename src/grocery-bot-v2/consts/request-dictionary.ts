@@ -1,3 +1,5 @@
+import { UserActionStrings } from '../dto/completion-body.dto';
+
 export const Descriptions: Record<
   RequestActions,
   {
@@ -37,3 +39,15 @@ export enum FunctionEntityTypes {
   array = 'array',
   boolean = 'boolean',
 }
+
+export interface UserActionArgs {
+  list: PredictItemEntity[];
+  action: UserActionStrings;
+}
+
+export type PredictItemEntity = {
+  name: string;
+  quantity: number;
+  unit: string;
+  removeAll: boolean;
+};

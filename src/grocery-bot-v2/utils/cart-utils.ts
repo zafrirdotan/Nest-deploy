@@ -1,51 +1,113 @@
 import { ICartItem } from 'src/grocery-bot-v2/dto/completion-body.dto';
+import { PredictItemEntity } from '../consts/request-dictionary';
 
-export function reduceArrays(cart: ICartItem[], removedItems: ICartItem[]) {
-  if (!cart || cart.length === 0) {
-    return [];
+export function reduceFromCart(
+  cart: ICartItem[],
+  itemsToRemove: PredictItemEntity[],
+) {
+  if (!cart?.length || !itemsToRemove?.length) {
+    return {
+      cart,
+      reducedItems: [],
+    };
   }
 
-  if (!removedItems || removedItems.length === 0) {
-    return cart;
-  }
+  const newCartDeepCopy = JSON.parse(JSON.stringify(cart));
 
-  const newCart = cart
-    .map((cartItem) => {
-      const removedItem = removedItems.find(
-        (removedItem) =>
-          removedItem.name === cartItem.name ||
-          cartItem.name.includes(removedItem.name) ||
-          cartItem.searchKeywords.includes(removedItem.name),
+  const reducedItems = [];
+  itemsToRemove.forEach((item) => {
+    const itemName = item.name.toLowerCase();
+    const existingItem = newCartDeepCopy.find((cartItem) => {
+      const cartItemName = cartItem.name?.toLowerCase();
+
+      return (
+        cartItemName === itemName ||
+        cartItemName?.startsWith(itemName) ||
+        cartItem.searchKeywords?.includes(itemName)
       );
-      if (removedItem) {
-        return {
-          ...cartItem,
-          quantity: cartItem.quantity - removedItem.quantity,
-        };
+    });
+
+    if (existingItem) {
+      let newQuantity;
+      console.log('existingItem', existingItem);
+
+      if (item.removeAll || !item.quantity) {
+        newQuantity = 0;
+      } else {
+        newQuantity = existingItem.quantity - item.quantity;
       }
-      return cartItem;
-    })
-    .filter((item) => item.quantity > 0);
 
-  return Array.from(newCart);
-}
+      if (newQuantity < 0) {
+        newQuantity = 0;
+      }
+      console.log('newQuantity', newQuantity);
 
-export function mergeArrays(cart: ICartItem[], addedItems: ICartItem[]) {
-  const mergedArray = [...cart, ...addedItems];
-  const nameToItem = new Map();
+      reducedItems.push({
+        name: existingItem.name,
+        quantity: existingItem.quantity - newQuantity,
+      });
 
-  mergedArray.forEach((item) => {
-    if (!nameToItem.has(item.name)) {
-      nameToItem.set(item.name, { ...item });
-    } else {
-      const existingItem = nameToItem.get(item.name);
-      existingItem.quantity =
-        (existingItem.quantity || 0) + (item.quantity || 0);
-      nameToItem.set(item.name, existingItem);
+      existingItem.quantity = newQuantity;
     }
   });
 
-  return Array.from(nameToItem.values());
+  return {
+    newCart: newCartDeepCopy.filter((item) => item.quantity > 0),
+    reducedItems,
+  };
+}
+
+export function removeProduct(cart: ICartItem[], productName: string) {
+  if (!cart || !productName) {
+    return cart;
+  }
+  productName = productName.toLowerCase();
+
+  return cart.filter(
+    (item) =>
+      !(
+        item.name.toLocaleLowerCase() === productName ||
+        item.name.toLocaleLowerCase().startsWith(productName) ||
+        item.searchKeywords?.includes(productName)
+      ),
+  );
+}
+
+export function addToCart(cart: ICartItem[], itemsToAdd: ICartItem[]) {
+  console.log('cart', cart);
+  console.log('itemsToAdd', itemsToAdd);
+
+  if (!itemsToAdd) {
+    return cart;
+  }
+
+  if (!cart) {
+    return itemsToAdd;
+  }
+
+  const cartMap = {};
+  cart.forEach((item) => {
+    cartMap[item.name] = item;
+  });
+  console.log('cartMap', cartMap);
+
+  itemsToAdd.forEach((item) => {
+    if (cartMap[item.name]) {
+      console.log('cartMap[item.name]', cartMap[item.name]);
+      console.log('item.quantity', item.quantity);
+      if (item.quantity === undefined) {
+        item.quantity = 1;
+      }
+
+      cartMap[item.name].quantity += item.quantity;
+      console.log('cartMap[item.name].quantity', cartMap[item.name].quantity);
+    } else {
+      item.emoji = getEmoji(item.name);
+      cartMap[item.name] = item;
+    }
+  });
+
+  return Object.values(cartMap);
 }
 
 const fruitEmojis: { [key: string]: string } = {

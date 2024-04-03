@@ -78,7 +78,7 @@ export const responseDictionary: Record<
   },
   clearCart: {
     he: () => 'האם אתה בטוח שברצונך לרוקן את העגלה שלך?',
-    en: () => 'Are you shore you want to clear your cart?',
+    en: () => 'Are you sure you want to clear your cart?',
   },
   cartCleared: {
     he: () => 'העגלה רוקנה',
